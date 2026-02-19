@@ -15,6 +15,11 @@ const PATH_PARAMETER_DESCRIPTION = `The path of the file to write to (relative t
 
 const CONTENT_PARAMETER_DESCRIPTION = `The content to write to the file. ALWAYS provide the COMPLETE intended content of the file, without any truncation or omissions. You MUST include ALL parts of the file, even if they haven't been modified. Do NOT include line numbers in the content.`
 
+// Phase 3: Intent-Code Traceability parameters
+const INTENT_ID_DESCRIPTION = `The active Intent ID that authorizes this file write (e.g., "INT-001"). This links the code change to its originating business requirement for traceability. If you have selected an active intent via select_active_intent, provide that intent ID here.`
+
+const MUTATION_CLASS_DESCRIPTION = `The semantic classification of this code change. Must be one of: "AST_REFACTOR" (syntax change preserving the same intent — rename, extract, reformat) or "INTENT_EVOLUTION" (new feature or behavior change). This enables the AI-Native Git Layer to distinguish refactors from features mathematically.`
+
 export default {
 	type: "function",
 	function: {
@@ -32,8 +37,17 @@ export default {
 					type: "string",
 					description: CONTENT_PARAMETER_DESCRIPTION,
 				},
+				intent_id: {
+					type: "string",
+					description: INTENT_ID_DESCRIPTION,
+				},
+				mutation_class: {
+					type: "string",
+					description: MUTATION_CLASS_DESCRIPTION,
+					enum: ["AST_REFACTOR", "INTENT_EVOLUTION"],
+				},
 			},
-			required: ["path", "content"],
+			required: ["path", "content", "intent_id", "mutation_class"],
 			additionalProperties: false,
 		},
 	},

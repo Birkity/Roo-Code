@@ -2,11 +2,12 @@
  * index.ts — Public API for the Hook Engine module
  *
  * Re-exports all hook components for clean imports:
- *   import { HookEngine, CommandClassifier, AuthorizationGate } from "../hooks"
+ *   import { HookEngine, CommandClassifier, TraceLogger } from "../hooks"
  *
  * Phase 1: HookEngine, IntentContextLoader, GatekeeperHook
  * Phase 2: CommandClassifier, AuthorizationGate, AutonomousRecovery,
  *          ScopeEnforcer, PostToolHook
+ * Phase 3: HashUtils, SemanticClassifier, TraceLogger
  *
  * @see HookEngine.ts — main orchestrator
  * @see IntentContextLoader.ts — select_active_intent handler
@@ -16,6 +17,9 @@
  * @see AutonomousRecovery.ts — structured rejection errors
  * @see ScopeEnforcer.ts — owned scope validation
  * @see PostToolHook.ts — post-edit formatting/linting
+ * @see HashUtils.ts — SHA-256 content hashing
+ * @see SemanticClassifier.ts — AST_REFACTOR vs INTENT_EVOLUTION
+ * @see TraceLogger.ts — Agent Trace serialization & persistence
  * @see types.ts — shared types and constants
  */
 
@@ -39,6 +43,26 @@ export type { ScopeCheckResult } from "./ScopeEnforcer"
 
 export { PostToolHook } from "./PostToolHook"
 export type { PostHookResult } from "./PostToolHook"
+
+// ── Phase 3 ──────────────────────────────────────────────────────────────
+export { HashUtils } from "./HashUtils"
+export type { HashResult, HashOptions } from "./HashUtils"
+
+export { SemanticClassifier, MutationClass } from "./SemanticClassifier"
+export type { MutationClassification, ClassificationSignals } from "./SemanticClassifier"
+
+export { TraceLogger } from "./TraceLogger"
+export type {
+	AgentTraceRecord,
+	TracedFile,
+	TraceConversation,
+	TraceContributor,
+	TraceRange,
+	TraceRelated,
+	MutationMetadata,
+	TraceInput,
+	TraceResult,
+} from "./TraceLogger"
 
 // ── Shared Types ─────────────────────────────────────────────────────────
 export type { HookContext, PreHookResult, IntentEntry, ActiveIntentsFile } from "./types"

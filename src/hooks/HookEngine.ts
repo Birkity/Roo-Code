@@ -63,6 +63,7 @@ import { AuthorizationGate, AuthorizationDecision } from "./AuthorizationGate"
 import { AutonomousRecovery } from "./AutonomousRecovery"
 import { ScopeEnforcer } from "./ScopeEnforcer"
 import { PostToolHook } from "./PostToolHook"
+import { TraceLogger } from "./TraceLogger"
 import type { HookContext, PreHookResult, IntentEntry, ActiveIntentsFile } from "./types"
 
 /**
@@ -87,6 +88,13 @@ export class HookEngine {
 
 	/** Workspace root path (cwd) */
 	private readonly cwd: string
+
+	/**
+	 * Phase 3: Cache of file content captured BEFORE tool execution.
+	 * Used by TraceLogger to compare old vs new for semantic classification.
+	 * Key = relative file path, Value = content before modification.
+	 */
+	private readonly _preWriteContent: Map<string, string> = new Map()
 
 	constructor(cwd: string) {
 		this.cwd = cwd
@@ -123,7 +131,14 @@ export class HookEngine {
 		}
 
 		// ── Phase 2: Security Boundary ───────────────────────────────────
-		return this.runPhase2SecurityBoundary(toolName, params)
+		const securityResult = await this.runPhase2SecurityBoundary(toolName, params)
+
+		// ── Phase 3: Capture pre-write content for trace comparison ──────
+		if (securityResult.action === "allow") {
+			this.capturePreWriteContent(toolName, params)
+		}
+
+		return securityResult
 	}
 
 	/**
@@ -252,34 +267,152 @@ export class HookEngine {
 	/**
 	 * Execute post-tool hooks after successful tool execution.
 	 *
-	 * Phase 2: Post-Edit Automation
-	 *   - Run Prettier on modified files
-	 *   - Run ESLint on modified files
-	 *   - Return error feedback for AI self-correction
+	 * Phase 2: Post-Edit Automation (Prettier + ESLint)
+	 * Phase 3: Agent Trace Recording (hash, classify, persist to JSONL)
 	 *
 	 * @param toolName - The tool that just executed
 	 * @param params   - The tool parameters
 	 * @returns Supplementary feedback string, or null if no issues
 	 */
 	async runPostHooks(toolName: string, params: Record<string, unknown>): Promise<string | null> {
+		const feedbackParts: string[] = []
+
+		// ── Phase 2: Post-Edit Formatting ────────────────────────────
 		try {
 			const result = await PostToolHook.execute(toolName, params, this.cwd)
 
 			if (result.hasErrors && result.feedback) {
 				console.warn(`[HookEngine] Post-hook errors for ${toolName}: ${result.feedback}`)
-				return result.feedback
-			}
-
-			if (result.feedback) {
+				feedbackParts.push(result.feedback)
+			} else if (result.feedback) {
 				console.log(`[HookEngine] Post-hook feedback for ${toolName}: ${result.feedback}`)
+				feedbackParts.push(result.feedback)
 			}
-
-			return result.feedback
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : "Unknown post-hook error"
 			console.error(`[HookEngine] Post-hook error: ${errorMessage}`)
-			// Post-hooks are non-blocking — don't fail the tool execution
+		}
+
+		// ── Phase 3: Agent Trace Recording ───────────────────────────
+		try {
+			const traceFeedback = await this.recordTraceIfNeeded(toolName, params)
+			if (traceFeedback) {
+				feedbackParts.push(traceFeedback)
+			}
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : "Unknown trace error"
+			console.error(`[HookEngine] Trace recording error: ${errorMessage}`)
+		}
+
+		return feedbackParts.length > 0 ? feedbackParts.join("\n\n") : null
+	}
+
+	// ── Phase 3: Agent Trace Recording ──────────────────────────────────
+
+	/** Tools that produce file modifications and should trigger trace logging */
+	private static readonly TRACE_TOOLS: ReadonlySet<string> = new Set([
+		"write_to_file",
+		"apply_diff",
+		"edit",
+		"search_and_replace",
+		"search_replace",
+		"edit_file",
+		"apply_patch",
+	])
+
+	/**
+	 * Record an Agent Trace entry if the tool modified a file.
+	 *
+	 * This implements the Phase 3 post-hook:
+	 *   1. Read old file content (for semantic classification)
+	 *   2. Read new file content (for content hashing)
+	 *   3. Classify mutation (AST_REFACTOR vs INTENT_EVOLUTION)
+	 *   4. Compute SHA-256 content hash (spatial independence)
+	 *   5. Get Git SHA (VCS anchoring)
+	 *   6. Build & append Agent Trace JSON to agent_trace.jsonl
+	 *
+	 * @returns Trace feedback string, or null if not applicable
+	 */
+	private async recordTraceIfNeeded(toolName: string, params: Record<string, unknown>): Promise<string | null> {
+		if (!HookEngine.TRACE_TOOLS.has(toolName)) {
 			return null
+		}
+
+		// Extract file path from params
+		const filePath = this.extractWriteFilePath(toolName, params)
+		if (!filePath) {
+			return null
+		}
+
+		// Read old content (captured before tool execution if available,
+		// otherwise read current — for new files this returns "")
+		const oldContent = this._preWriteContent.get(filePath) ?? ""
+
+		// Read new content from disk (tool has already written it)
+		const newContent = TraceLogger.readOldContent(filePath, this.cwd)
+		if (!newContent) {
+			return null
+		}
+
+		// Record the trace
+		const result = await TraceLogger.recordTrace(
+			{
+				toolName,
+				params,
+				filePath,
+				oldContent,
+				newContent,
+				activeIntentId: this._activeIntentId,
+				agentMutationClass: typeof params.mutation_class === "string" ? params.mutation_class : undefined,
+			},
+			this.cwd,
+		)
+
+		// Clean up pre-write cache
+		this._preWriteContent.delete(filePath)
+
+		return result.feedback
+	}
+
+	/**
+	 * Extract the target file path from tool params.
+	 * Different tools use different parameter names.
+	 */
+	private extractWriteFilePath(toolName: string, params: Record<string, unknown>): string | null {
+		// write_to_file uses "path"
+		if (typeof params.path === "string") {
+			return params.path
+		}
+		// apply_diff, edit_file, search_and_replace use "file_path"
+		if (typeof params.file_path === "string") {
+			return params.file_path
+		}
+		// Fallback: try common param names
+		if (typeof params.filePath === "string") {
+			return params.filePath
+		}
+		return null
+	}
+
+	/**
+	 * Capture the current file content BEFORE a write operation.
+	 *
+	 * Called by the pre-hook pipeline before the tool executes,
+	 * so that the post-hook can compare old vs new for semantic
+	 * classification.
+	 *
+	 * @param toolName - The tool about to execute
+	 * @param params   - The tool parameters
+	 */
+	capturePreWriteContent(toolName: string, params: Record<string, unknown>): void {
+		if (!HookEngine.TRACE_TOOLS.has(toolName)) {
+			return
+		}
+
+		const filePath = this.extractWriteFilePath(toolName, params)
+		if (filePath) {
+			const content = TraceLogger.readOldContent(filePath, this.cwd)
+			this._preWriteContent.set(filePath, content)
 		}
 	}
 
