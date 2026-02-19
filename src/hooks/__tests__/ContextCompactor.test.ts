@@ -1,21 +1,10 @@
-/**
- * ContextCompactor.test.ts — Tests for Phase 4 context compaction.
- *
- * Validates: tool output truncation, conversation compaction,
- * token estimation, turn summarization, and sub-agent context preparation.
- */
-
 import * as fs from "node:fs"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ContextCompactor } from "../ContextCompactor"
 import type { ConversationTurn } from "../ContextCompactor"
 
-// ── Mocks ────────────────────────────────────────────────────────────────
-
 vi.mock("node:fs")
-
-// ── Helpers ──────────────────────────────────────────────────────────────
 
 function makeTurn(role: string, content: string, toolName?: string): ConversationTurn {
 	return {
@@ -38,8 +27,6 @@ function makeConversation(count: number): ConversationTurn[] {
 	return turns
 }
 
-// ── Tests ────────────────────────────────────────────────────────────────
-
 describe("ContextCompactor", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
@@ -48,8 +35,6 @@ describe("ContextCompactor", () => {
 	afterEach(() => {
 		vi.restoreAllMocks()
 	})
-
-	// ── truncateToolOutput ───────────────────────────────────────────
 
 	describe("truncateToolOutput", () => {
 		it("returns short output unchanged", () => {
@@ -84,8 +69,6 @@ describe("ContextCompactor", () => {
 		})
 	})
 
-	// ── estimateTokens ───────────────────────────────────────────────
-
 	describe("estimateTokens", () => {
 		it("estimates tokens based on character count", () => {
 			const turns = [makeTurn("user", "a".repeat(400))]
@@ -114,8 +97,6 @@ describe("ContextCompactor", () => {
 			expect(ContextCompactor.estimateStringTokens("abc")).toBe(1)
 		})
 	})
-
-	// ── summarizeTurns ───────────────────────────────────────────────
 
 	describe("summarizeTurns", () => {
 		it("returns 'No prior context' for empty turns", () => {
@@ -167,8 +148,6 @@ describe("ContextCompactor", () => {
 			expect(summary).toContain("9 prior conversation turns")
 		})
 	})
-
-	// ── compact ──────────────────────────────────────────────────────
 
 	describe("compact", () => {
 		it("returns turns unchanged when within token budget", () => {
@@ -232,8 +211,6 @@ describe("ContextCompactor", () => {
 			expect(toolTurn!.content.length).toBeLessThan(10000)
 		})
 	})
-
-	// ── prepareSubAgentContext ────────────────────────────────────────
 
 	describe("prepareSubAgentContext", () => {
 		it("builds a SubAgentContext with task spec and summary", () => {

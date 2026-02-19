@@ -1,24 +1,12 @@
-/**
- * OptimisticLock.test.ts — Tests for Phase 4 hash-based optimistic locking.
- *
- * Validates: hash capture, write validation (match/mismatch/deleted/missing),
- * agent-scoped snapshots, ring-buffer pruning, lock state lifecycle,
- * path normalization, and structured error formatting.
- */
-
 import * as fs from "node:fs"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { OptimisticLockManager } from "../OptimisticLock"
 import type { LockValidationResult } from "../OptimisticLock"
 
-// ── Mocks ────────────────────────────────────────────────────────────────
-
 vi.mock("node:fs")
 
 const CWD = "/workspace"
-
-// ── Helpers ──────────────────────────────────────────────────────────────
 
 function mockFileContent(content: string) {
 	vi.mocked(fs.existsSync).mockReturnValue(true)
@@ -34,8 +22,6 @@ function mockFileExistsThenReturns(content: string) {
 	vi.mocked(fs.readFileSync).mockReturnValue(content)
 }
 
-// ── Tests ────────────────────────────────────────────────────────────────
-
 describe("OptimisticLockManager", () => {
 	let manager: OptimisticLockManager
 
@@ -47,8 +33,6 @@ describe("OptimisticLockManager", () => {
 	afterEach(() => {
 		vi.restoreAllMocks()
 	})
-
-	// ── captureReadHash ──────────────────────────────────────────────
 
 	describe("captureReadHash", () => {
 		it("captures hash for an existing file", () => {
@@ -94,8 +78,6 @@ describe("OptimisticLockManager", () => {
 			expect(manager.trackedFiles).toContain("src/b.ts")
 		})
 	})
-
-	// ── validateWrite ────────────────────────────────────────────────
 
 	describe("validateWrite", () => {
 		it("allows write when file is unchanged", () => {
@@ -186,8 +168,6 @@ describe("OptimisticLockManager", () => {
 		})
 	})
 
-	// ── updateAfterWrite ─────────────────────────────────────────────
-
 	describe("updateAfterWrite", () => {
 		it("replaces the baseline hash after a successful write", () => {
 			mockFileContent("old content")
@@ -215,8 +195,6 @@ describe("OptimisticLockManager", () => {
 			expect(result).toBeNull()
 		})
 	})
-
-	// ── clearFile / clearAll ─────────────────────────────────────────
 
 	describe("clearFile", () => {
 		it("removes tracking for a specific file", () => {
@@ -248,8 +226,6 @@ describe("OptimisticLockManager", () => {
 		})
 	})
 
-	// ── getSnapshot ──────────────────────────────────────────────────
-
 	describe("getSnapshot", () => {
 		it("returns the latest snapshot for a tracked file", () => {
 			mockFileContent("content-1")
@@ -265,8 +241,6 @@ describe("OptimisticLockManager", () => {
 		})
 	})
 
-	// ── normalizePath (static) ───────────────────────────────────────
-
 	describe("normalizePath", () => {
 		it("converts backslashes to forward slashes", () => {
 			expect(OptimisticLockManager.normalizePath(String.raw`src\hooks\file.ts`)).toBe("src/hooks/file.ts")
@@ -280,8 +254,6 @@ describe("OptimisticLockManager", () => {
 			expect(OptimisticLockManager.normalizePath("src/file.ts")).toBe("src/file.ts")
 		})
 	})
-
-	// ── formatStaleFileError (static) ────────────────────────────────
 
 	describe("formatStaleFileError", () => {
 		it("produces structured XML error feedback", () => {
@@ -326,8 +298,6 @@ describe("OptimisticLockManager", () => {
 			expect(error).toContain("deleted") // currentHash
 		})
 	})
-
-	// ── Ring buffer behavior ─────────────────────────────────────────
 
 	describe("ring buffer", () => {
 		it("keeps at most MAX_SNAPSHOTS_PER_FILE entries per file", () => {

@@ -1,41 +1,9 @@
-/**
- * index.ts — Public API for the Hook Engine module
- *
- * Re-exports all hook components for clean imports:
- *   import { HookEngine, CommandClassifier, TraceLogger } from "../hooks"
- *
- * Phase 1: HookEngine, IntentContextLoader, GatekeeperHook
- * Phase 2: CommandClassifier, AuthorizationGate, AutonomousRecovery,
- *          ScopeEnforcer, PostToolHook
- * Phase 3: HashUtils, SemanticClassifier, TraceLogger
- * Phase 4: OptimisticLockManager, AstPatchValidator, LessonRecorder,
- *          ContextCompactor, SupervisorOrchestrator
- *
- * @see HookEngine.ts — main orchestrator
- * @see IntentContextLoader.ts — select_active_intent handler
- * @see PreToolHook.ts — gatekeeper validation
- * @see CommandClassifier.ts — risk tier classification
- * @see AuthorizationGate.ts — HITL modal dialog
- * @see AutonomousRecovery.ts — structured rejection errors
- * @see ScopeEnforcer.ts — owned scope validation
- * @see PostToolHook.ts — post-edit formatting/linting
- * @see HashUtils.ts — SHA-256 content hashing
- * @see SemanticClassifier.ts — AST_REFACTOR vs INTENT_EVOLUTION
- * @see TraceLogger.ts — Agent Trace serialization & persistence
- * @see OptimisticLock.ts — concurrency control via hash-based locking
- * @see AstPatchValidator.ts — AST-aware patch enforcement
- * @see LessonRecorder.ts — lessons learned persistence to CLAUDE.md
- * @see ContextCompactor.ts — context compaction for sub-agents
- * @see SupervisorOrchestrator.ts — hierarchical orchestration
- * @see types.ts — shared types and constants
- */
+/** Public API for the Hook Engine module. */
 
-// ── Phase 1 ──────────────────────────────────────────────────────────────
 export { HookEngine } from "./HookEngine"
 export { IntentContextLoader } from "./IntentContextLoader"
 export { GatekeeperHook } from "./PreToolHook"
 
-// ── Phase 2 ──────────────────────────────────────────────────────────────
 export { CommandClassifier, RiskTier } from "./CommandClassifier"
 export type { ClassificationResult } from "./CommandClassifier"
 
@@ -51,7 +19,6 @@ export type { ScopeCheckResult } from "./ScopeEnforcer"
 export { PostToolHook } from "./PostToolHook"
 export type { PostHookResult } from "./PostToolHook"
 
-// ── Phase 3 ──────────────────────────────────────────────────────────────
 export { HashUtils } from "./HashUtils"
 export type { HashResult, HashOptions } from "./HashUtils"
 
@@ -71,7 +38,9 @@ export type {
 	TraceResult,
 } from "./TraceLogger"
 
-// ── Phase 4 ──────────────────────────────────────────────────────────────
+export { SpecifyParser } from "./SpecifyParser"
+export type { SpecRequirement } from "./SpecifyParser"
+
 export { OptimisticLockManager } from "./OptimisticLock"
 export type { FileHashSnapshot, LockValidationResult } from "./OptimisticLock"
 
@@ -87,6 +56,5 @@ export type { ConversationTurn, CompactionConfig, CompactionResult, SubAgentCont
 export { SupervisorOrchestrator, AgentRole, SubTaskStatus } from "./SupervisorOrchestrator"
 export type { SubTask, SubTaskCompletionPayload, OrchestrationState } from "./SupervisorOrchestrator"
 
-// ── Shared Types ─────────────────────────────────────────────────────────
 export type { HookContext, PreHookResult, IntentEntry, ActiveIntentsFile } from "./types"
 export { MUTATING_TOOLS, EXEMPT_TOOLS } from "./types"

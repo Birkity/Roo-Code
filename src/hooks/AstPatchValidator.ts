@@ -1,31 +1,6 @@
-/**
- * AstPatchValidator.ts — Phase 4: AST-Aware Patching Enforcement
- *
- * Forces agents to emit targeted patch actions (unified diffs) rather
- * than rewriting entire files, preventing overwriting of unrelated
- * human or agent modifications.
- *
- * Strategies:
- *   1. Full-File Rewrite Detection — blocks write_to_file if content is
- *      disproportionately large relative to the actual change
- *   2. Diff-Based Validation — validates that apply_diff patches are
- *      structurally sound and target specific functions/blocks
- *   3. Patch Guidance — when blocking a full rewrite, provides guidance
- *      to the agent on using apply_diff instead
- *
- * This ensures that in multi-agent environments, edits are applied
- * cleanly to specific functions without overwriting unrelated work.
- *
- * @see HookEngine.ts — integrates this as a pre-write validation hook
- * @see Research Paper: AST-Aware Patching & Targeted Patch Resolution
- * @see TRP1 Challenge Week 1, Phase 4: AST-Aware Patching
- */
+/** AST-aware patching enforcement — blocks full-file rewrites in favor of targeted diffs. */
 
-// ── Types ────────────────────────────────────────────────────────────────
-
-/**
- * Result of a patch validation check.
- */
+/** Result of a patch validation check. */
 export interface PatchValidationResult {
 	/** Whether the patch/write is acceptable */
 	valid: boolean
@@ -46,9 +21,7 @@ export interface PatchValidationResult {
 	changeRatio: number
 }
 
-/**
- * Types of patches/writes the system can detect.
- */
+/** Types of patches/writes the system can detect. */
 export enum PatchType {
 	/** A targeted diff affecting specific lines/functions */
 	TARGETED_DIFF = "TARGETED_DIFF",
@@ -62,9 +35,7 @@ export enum PatchType {
 	SEARCH_REPLACE = "SEARCH_REPLACE",
 }
 
-/**
- * AST-level patch target info (for structural anchoring).
- */
+/** AST-level patch target info (for structural anchoring). */
 export interface PatchTarget {
 	/** Type of AST node targeted */
 	nodeType: "function" | "class" | "interface" | "export" | "import" | "block" | "unknown"
@@ -79,9 +50,7 @@ export interface PatchTarget {
 	endLine: number
 }
 
-/**
- * A parsed unified diff hunk.
- */
+/** A parsed unified diff hunk. */
 export interface DiffHunk {
 	/** Old file start line */
 	oldStart: number
@@ -95,25 +64,12 @@ export interface DiffHunk {
 	content: string[]
 }
 
-// ── Constants ────────────────────────────────────────────────────────────
-
-/**
- * Change ratio threshold. If more than this fraction of the file changes,
- * it's considered a full rewrite and the agent should use apply_diff.
- *
- * A 60% change ratio means >60% of lines differ → likely a rewrite.
- */
+/** Above this change ratio, a write is considered a full rewrite. */
 const FULL_REWRITE_THRESHOLD = 0.6
 
-/**
- * Minimum file size (in lines) to trigger full-rewrite detection.
- * Very small files (<15 lines) can be safely fully rewritten.
- */
+/** Files below this line count skip rewrite detection. */
 const MIN_LINES_FOR_REWRITE_CHECK = 15
 
-/**
- * Tools for which AST-aware patch validation is applied.
- */
 const PATCH_VALIDATED_TOOLS: ReadonlySet<string> = new Set([
 	"write_to_file",
 	"apply_diff",
@@ -124,41 +80,16 @@ const PATCH_VALIDATED_TOOLS: ReadonlySet<string> = new Set([
 	"apply_patch",
 ])
 
-// ── Regex Patterns for AST Node Detection ────────────────────────────────
-
-/** Matches function declarations/expressions */
 const FUNCTION_DECLARATION_PATTERN = /(?:export\s+)?(?:async\s+)?function\s+(\w+)/
 
-/** Matches arrow function or function expression assignments */
 const FUNCTION_ASSIGNMENT_PATTERN = /(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:\([^)]*\)\s*=>|function)/
 
-/** Matches class declarations */
 const CLASS_PATTERN = /(?:export\s+)?(?:abstract\s+)?class\s+(\w+)/
 
-/** Matches interface/type declarations */
 const INTERFACE_PATTERN = /(?:export\s+)?(?:interface|type)\s+(\w+)/
 
-// ── AstPatchValidator ────────────────────────────────────────────────────
-
-/**
- * Validates and enforces AST-aware patching policies.
- *
- * All methods are static — no state needed.
- */
+/** Validates and enforces AST-aware patching policies. */
 export class AstPatchValidator {
-	// ── Primary Validation ───────────────────────────────────────────
-
-	/**
-	 * Validate a write operation for AST-awareness.
-	 *
-	 * Called by HookEngine in the pre-hook pipeline for write tools.
-	 *
-	 * @param toolName     - The tool being used (write_to_file, apply_diff, etc.)
-	 * @param oldContent   - The file content before the write (empty for new files)
-	 * @param newContent   - The proposed new content
-	 * @param params       - Raw tool parameters
-	 * @returns PatchValidationResult indicating whether the write is acceptable
-	 */
 	static validate(
 		toolName: string,
 		oldContent: string,
@@ -169,12 +100,10 @@ export class AstPatchValidator {
 			return AstPatchValidator.allowResult("Non-validated tool", PatchType.MINOR_EDIT, 0)
 		}
 
-		// New file — always allowed
 		if (oldContent.trim() === "") {
 			return AstPatchValidator.allowResult("New file creation", PatchType.NEW_FILE, 1)
 		}
 
-		// Search and replace — inherently targeted
 		if (toolName === "search_and_replace" || toolName === "search_replace") {
 			return AstPatchValidator.allowResult(
 				"Search-and-replace is inherently targeted",
@@ -183,26 +112,17 @@ export class AstPatchValidator {
 			)
 		}
 
-		// apply_diff — validate the diff structure
 		if (toolName === "apply_diff" || toolName === "apply_patch") {
 			return AstPatchValidator.validateDiff(params)
 		}
 
-		// write_to_file — check for full rewrites
 		return AstPatchValidator.validateFullWrite(oldContent, newContent)
 	}
 
-	// ── Full Rewrite Detection ───────────────────────────────────────
-
-	/**
-	 * Check if a write_to_file operation is actually a full rewrite
-	 * that should have been an apply_diff instead.
-	 */
 	private static validateFullWrite(oldContent: string, newContent: string): PatchValidationResult {
 		const oldLines = oldContent.split("\n")
 		const newLines = newContent.split("\n")
 
-		// Small files can be fully rewritten safely
 		if (oldLines.length < MIN_LINES_FOR_REWRITE_CHECK) {
 			const changeRatio = AstPatchValidator.computeChangeRatio(oldContent, newContent)
 			return AstPatchValidator.allowResult(
@@ -214,7 +134,6 @@ export class AstPatchValidator {
 
 		const changeRatio = AstPatchValidator.computeChangeRatio(oldContent, newContent)
 
-		// If the change ratio exceeds the threshold, it's a full rewrite
 		if (changeRatio >= FULL_REWRITE_THRESHOLD) {
 			const changedFunctions = AstPatchValidator.identifyChangedSymbols(oldContent, newContent)
 			const guidance = AstPatchValidator.buildDiffGuidance(changedFunctions, oldContent, newContent)
@@ -239,11 +158,6 @@ export class AstPatchValidator {
 		)
 	}
 
-	// ── Diff Validation ──────────────────────────────────────────────
-
-	/**
-	 * Validate that an apply_diff operation has well-formed hunks.
-	 */
 	private static validateDiff(params: Record<string, unknown>): PatchValidationResult {
 		let diffContent: string | null = null
 		if (typeof params.diff === "string") {
@@ -260,7 +174,6 @@ export class AstPatchValidator {
 			)
 		}
 
-		// Parse unified diff hunks
 		const hunks = AstPatchValidator.parseUnifiedDiff(diffContent)
 
 		if (hunks.length === 0) {
@@ -271,7 +184,6 @@ export class AstPatchValidator {
 			)
 		}
 
-		// Check that hunks are reasonable (not the entire file)
 		const totalHunkLines = hunks.reduce((sum, h) => sum + h.newCount, 0)
 		const changeEstimate = totalHunkLines > 0 ? Math.min(totalHunkLines / 100, 1) : 0
 
@@ -282,28 +194,19 @@ export class AstPatchValidator {
 		)
 	}
 
-	// ── AST Symbol Detection ─────────────────────────────────────────
-
-	/**
-	 * Identify functions/classes that changed between old and new content.
-	 * Returns structural anchor names for the diff guidance.
-	 */
+	/** Identify functions/classes that changed between old and new content. */
 	static identifyChangedSymbols(oldContent: string, newContent: string): PatchTarget[] {
 		const oldSymbols = AstPatchValidator.extractSymbols(oldContent)
 		const newSymbols = AstPatchValidator.extractSymbols(newContent)
 		const changed: PatchTarget[] = []
 
-		// Find symbols that exist in both but differ
 		for (const newSym of newSymbols) {
 			const oldSym = oldSymbols.find((s) => s.symbolName === newSym.symbolName && s.nodeType === newSym.nodeType)
 			if (!oldSym) {
-				// New symbol — was added
 				changed.push(newSym)
 			}
-			// We don't do deep body comparison here — just detect structural changes
 		}
 
-		// Find symbols that were in old but not in new (deleted)
 		for (const oldSym of oldSymbols) {
 			const exists = newSymbols.find((s) => s.symbolName === oldSym.symbolName && s.nodeType === oldSym.nodeType)
 			if (!exists) {
@@ -314,10 +217,7 @@ export class AstPatchValidator {
 		return changed
 	}
 
-	/**
-	 * Extract AST-level symbols (functions, classes, interfaces) from content.
-	 * Uses regex-based detection (lightweight alternative to full AST parsing).
-	 */
+	/** Extract symbols (functions, classes, interfaces) via regex-based detection. */
 	static extractSymbols(content: string): PatchTarget[] {
 		const symbols: PatchTarget[] = []
 		const lines = content.split("\n")
@@ -325,7 +225,6 @@ export class AstPatchValidator {
 		for (let i = 0; i < lines.length; i++) {
 			const line = lines[i]
 
-			// Check for function declarations
 			const funcDeclMatch = FUNCTION_DECLARATION_PATTERN.exec(line)
 			const funcAssignMatch = funcDeclMatch ? null : FUNCTION_ASSIGNMENT_PATTERN.exec(line)
 			const funcMatch = funcDeclMatch ?? funcAssignMatch
@@ -341,7 +240,6 @@ export class AstPatchValidator {
 				continue
 			}
 
-			// Check for class declarations
 			const classMatch = CLASS_PATTERN.exec(line)
 			if (classMatch) {
 				const endLine = AstPatchValidator.findBlockEnd(lines, i)
@@ -354,7 +252,6 @@ export class AstPatchValidator {
 				continue
 			}
 
-			// Check for interface/type declarations
 			const ifaceMatch = INTERFACE_PATTERN.exec(line)
 			if (ifaceMatch) {
 				const endLine = AstPatchValidator.findBlockEnd(lines, i)
@@ -370,12 +267,7 @@ export class AstPatchValidator {
 		return symbols
 	}
 
-	// ── Diff Parsing ─────────────────────────────────────────────────
-
-	/**
-	 * Parse a unified diff into hunks.
-	 * Handles standard `@@ -a,b +c,d @@` format.
-	 */
+	/** Parse a unified diff string into structured hunks. */
 	static parseUnifiedDiff(diffText: string): DiffHunk[] {
 		const hunks: DiffHunk[] = []
 		const hunkHeaderPattern = /^@@\s*-(\d+)(?:,(\d+))?\s*\+(\d+)(?:,(\d+))?\s*@@/
@@ -408,16 +300,7 @@ export class AstPatchValidator {
 		return hunks
 	}
 
-	// ── Change Ratio Computation ─────────────────────────────────────
-
-	/**
-	 * Compute the ratio of changed lines between old and new content.
-	 *
-	 * Uses a simple line-by-line comparison. For large files, this is
-	 * O(n) and gives a reasonable estimate without full diff computation.
-	 *
-	 * @returns A ratio between 0 (identical) and 1 (completely different)
-	 */
+	/** Compute the ratio of changed lines (0 = identical, 1 = completely different). */
 	static computeChangeRatio(oldContent: string, newContent: string): number {
 		const oldLines = oldContent.split("\n")
 		const newLines = newContent.split("\n")
@@ -427,7 +310,6 @@ export class AstPatchValidator {
 			return 0
 		}
 
-		// Count lines that are different
 		let diffCount = 0
 		const oldSet = new Set(oldLines.map((l) => l.trim()))
 
@@ -437,7 +319,6 @@ export class AstPatchValidator {
 			}
 		}
 
-		// Also count removed lines
 		const newSet = new Set(newLines.map((l) => l.trim()))
 		for (const line of oldLines) {
 			if (!newSet.has(line.trim())) {
@@ -445,15 +326,9 @@ export class AstPatchValidator {
 			}
 		}
 
-		// Ratio over the total lines (old + new, deduplicated by max)
 		return Math.min(diffCount / (maxLines * 2), 1)
 	}
 
-	// ── Guidance Generation ──────────────────────────────────────────
-
-	/**
-	 * Build structured diff guidance for the agent when a full rewrite is blocked.
-	 */
 	private static buildDiffGuidance(changedSymbols: PatchTarget[], oldContent: string, newContent: string): string {
 		const lines = [
 			"<patch_guidance>",
@@ -481,11 +356,6 @@ export class AstPatchValidator {
 		return lines.join("\n")
 	}
 
-	// ── Private Helpers ──────────────────────────────────────────────
-
-	/**
-	 * Build an allowed PatchValidationResult.
-	 */
 	private static allowResult(reason: string, patchType: PatchType, changeRatio: number): PatchValidationResult {
 		return {
 			valid: true,
@@ -497,10 +367,7 @@ export class AstPatchValidator {
 		}
 	}
 
-	/**
-	 * Find the end of a code block (balanced brace matching).
-	 * Returns the line index of the closing brace.
-	 */
+	/** Find the end of a code block via balanced brace matching. */
 	private static findBlockEnd(lines: string[], startLine: number): number {
 		let braceCount = 0
 		let foundOpen = false
@@ -519,7 +386,44 @@ export class AstPatchValidator {
 			}
 		}
 
-		// If no balanced braces, assume single-line or un-braced construct
 		return startLine
+	}
+
+	/** Patch MCP tool definitions to include AST-aware patch enforcement warnings. */
+	static patchMcpToolDefinitions(
+		tools: Array<{ name: string; description: string; parameters?: Record<string, unknown> }>,
+	): Array<{ name: string; description: string; parameters?: Record<string, unknown> }> {
+		const writeToolNames = new Set(["write_to_file", "insert_content", "create_file"])
+
+		const patchWarning =
+			"\n\n⚠️ AST-AWARE PATCH ENFORCEMENT: " +
+			"Full-file rewrites on files with >15 lines are BLOCKED. " +
+			"Use apply_diff or search_and_replace for targeted edits instead. " +
+			"Only new files or files ≤15 lines may use write_to_file."
+
+		return tools.map((tool) => {
+			if (writeToolNames.has(tool.name)) {
+				return {
+					...tool,
+					description: tool.description + patchWarning,
+				}
+			}
+			return tool
+		})
+	}
+
+	/** Get tool definition overrides for AST-aware patch enforcement. */
+	static getToolDefinitionOverrides(): Record<string, string> {
+		return {
+			write_to_file:
+				"⚠️ AST-AWARE PATCH ENFORCEMENT: " +
+				"Full-file rewrites on files with >15 lines are BLOCKED by the " +
+				"AST-Aware Patch Validator. Use apply_diff or search_and_replace " +
+				"for targeted edits. Only new files or files ≤15 lines may use write_to_file. " +
+				"Required parameters: intent_id, mutation_class.",
+			insert_content:
+				"⚠️ This tool is validated by the AST-Aware Patch Validator. " +
+				"Content must target specific locations, not rewrite entire file sections.",
+		}
 	}
 }

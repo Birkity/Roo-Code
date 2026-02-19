@@ -1,8 +1,3 @@
-/**
- * HashUtils.test.ts — Tests for Phase 3 spatial hashing:
- * SHA-256 with prefix, normalization, range hashing, verification, spatial independence.
- */
-
 import { describe, it, expect } from "vitest"
 import { HashUtils } from "../HashUtils"
 

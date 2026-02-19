@@ -1,8 +1,3 @@
-/**
- * TraceLogger.test.ts — Tests for Phase 3 Agent Trace serialization:
- * Schema compliance, intent ID injection, content hashing, JSONL persistence.
- */
-
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import * as fs from "node:fs"
 import * as path from "node:path"
@@ -330,7 +325,6 @@ describe("TraceLogger", () => {
 			expect(conv.ranges[0]).toHaveProperty("end_line")
 			expect(conv.ranges[0]).toHaveProperty("content_hash")
 
-			// Phase 3 extension: mutation metadata
 			expect(record).toHaveProperty("mutation")
 			expect(record.mutation).toHaveProperty("mutation_class")
 			expect(record.mutation).toHaveProperty("score")

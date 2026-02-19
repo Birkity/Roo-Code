@@ -4,6 +4,8 @@ const WRITE_TO_FILE_DESCRIPTION = `Request to write content to a file. This tool
 
 **Important:** You should prefer using other editing tools over write_to_file when making changes to existing files, since write_to_file is slower and cannot handle large files. Use write_to_file primarily for new file creation.
 
+**⚠️ AST-Aware Patch Enforcement:** Full-file rewrites on existing files with more than 15 lines are BLOCKED by the AST-Aware Patch Validator. For existing files, use apply_diff or search_and_replace for targeted edits instead. Only new files or files with ≤15 lines may use write_to_file. Required parameters: intent_id and mutation_class.
+
 When using this tool, use it directly with the desired content. You do not need to display the content before using the tool. ALWAYS provide the COMPLETE file content in your response. This is NON-NEGOTIABLE. Partial updates or placeholders like '// rest of code unchanged' are STRICTLY FORBIDDEN. Failure to do so will result in incomplete or broken code.
 
 When creating a new project, organize all new files within a dedicated project directory unless the user specifies otherwise. Structure the project logically, adhering to best practices for the specific type of project being created.

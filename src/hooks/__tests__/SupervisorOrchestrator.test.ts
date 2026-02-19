@@ -1,18 +1,8 @@
-/**
- * SupervisorOrchestrator.test.ts — Tests for Phase 4 hierarchical orchestration.
- *
- * Validates: sub-task creation, preparation with context, completion lifecycle,
- * scope partitioning (overlap detection), dependency-aware execution order,
- * status reporting, and state persistence.
- */
-
 import * as fs from "node:fs"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { AgentRole, SubTaskStatus, SupervisorOrchestrator } from "../SupervisorOrchestrator"
 import type { SubTaskCompletionPayload } from "../SupervisorOrchestrator"
-
-// ── Mocks ────────────────────────────────────────────────────────────────
 
 vi.mock("node:fs")
 let uuidCounter = 0
@@ -26,8 +16,6 @@ vi.mock("uuid", () => ({
 
 const CWD = "/workspace"
 const INTENT = "intent-master-refactor"
-
-// ── Tests ────────────────────────────────────────────────────────────────
 
 describe("SupervisorOrchestrator", () => {
 	let orchestrator: SupervisorOrchestrator
@@ -43,8 +31,6 @@ describe("SupervisorOrchestrator", () => {
 	afterEach(() => {
 		vi.restoreAllMocks()
 	})
-
-	// ── createSubTask ────────────────────────────────────────────────
 
 	describe("createSubTask", () => {
 		it("creates a sub-task with correct properties", () => {
@@ -87,8 +73,6 @@ describe("SupervisorOrchestrator", () => {
 			expect(writeCall[0]).toContain("orchestration_state.json")
 		})
 	})
-
-	// ── prepareSubTask ───────────────────────────────────────────────
 
 	describe("prepareSubTask", () => {
 		it("returns SubAgentContext with task spec", () => {
@@ -133,8 +117,6 @@ describe("SupervisorOrchestrator", () => {
 			expect(updated!.status).toBe(SubTaskStatus.BLOCKED)
 		})
 	})
-
-	// ── completeSubTask ──────────────────────────────────────────────
 
 	describe("completeSubTask", () => {
 		it("marks task as COMPLETED on success", () => {
@@ -219,8 +201,6 @@ describe("SupervisorOrchestrator", () => {
 		})
 	})
 
-	// ── validateScopePartitioning ────────────────────────────────────
-
 	describe("validateScopePartitioning", () => {
 		it("returns empty array for disjoint scopes", () => {
 			orchestrator.createSubTask("Auth", AgentRole.BUILDER, ["src/auth/**"])
@@ -249,8 +229,6 @@ describe("SupervisorOrchestrator", () => {
 		})
 	})
 
-	// ── findScopeOverlap (static) ────────────────────────────────────
-
 	describe("findScopeOverlap", () => {
 		it("detects exact path overlap", () => {
 			const overlap = SupervisorOrchestrator.findScopeOverlap(["src/auth/login.ts"], ["src/auth/login.ts"])
@@ -267,8 +245,6 @@ describe("SupervisorOrchestrator", () => {
 			expect(overlap).toEqual([])
 		})
 	})
-
-	// ── getExecutionOrder ────────────────────────────────────────────
 
 	describe("getExecutionOrder", () => {
 		it("respects dependency ordering", () => {
@@ -297,8 +273,6 @@ describe("SupervisorOrchestrator", () => {
 			expect(order[0].priority).toBeLessThan(order[1].priority)
 		})
 	})
-
-	// ── generateStatusReport ─────────────────────────────────────────
 
 	describe("generateStatusReport", () => {
 		it("produces structured XML status report", () => {
@@ -333,8 +307,6 @@ describe("SupervisorOrchestrator", () => {
 		})
 	})
 
-	// ── state accessors ──────────────────────────────────────────────
-
 	describe("state accessors", () => {
 		it("exposes readonly state", () => {
 			expect(orchestrator.state.masterIntentId).toBe(INTENT)
@@ -351,8 +323,6 @@ describe("SupervisorOrchestrator", () => {
 		})
 	})
 
-	// ── AgentRole enum ───────────────────────────────────────────────
-
 	describe("AgentRole", () => {
 		it("has all expected roles", () => {
 			expect(AgentRole.ARCHITECT).toBe("ARCHITECT")
@@ -363,8 +333,6 @@ describe("SupervisorOrchestrator", () => {
 		})
 	})
 
-	// ── SubTaskStatus enum ───────────────────────────────────────────
-
 	describe("SubTaskStatus", () => {
 		it("has all expected statuses", () => {
 			expect(SubTaskStatus.PENDING).toBe("PENDING")
@@ -374,8 +342,6 @@ describe("SupervisorOrchestrator", () => {
 			expect(SubTaskStatus.BLOCKED).toBe("BLOCKED")
 		})
 	})
-
-	// ── loadState (static) ───────────────────────────────────────────
 
 	describe("loadState", () => {
 		it("returns null when state file does not exist", () => {

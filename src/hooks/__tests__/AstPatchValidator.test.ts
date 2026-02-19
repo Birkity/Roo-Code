@@ -1,16 +1,6 @@
-/**
- * AstPatchValidator.test.ts — Tests for Phase 4 AST-aware patch enforcement.
- *
- * Validates: full-rewrite detection, targeted diff acceptance, new file pass-through,
- * search-replace pass-through, change ratio computation, symbol extraction,
- * unified diff parsing, and guidance generation.
- */
-
 import { describe, expect, it } from "vitest"
 
 import { AstPatchValidator, PatchType } from "../AstPatchValidator"
-
-// ── Helpers ──────────────────────────────────────────────────────────────
 
 /** Generate a multi-line file with N functions, each ~5 lines */
 function generateLargeFile(funcCount: number): string {
@@ -28,11 +18,7 @@ function generateLargeFile(funcCount: number): string {
 	return lines.join("\n")
 }
 
-// ── Tests ────────────────────────────────────────────────────────────────
-
 describe("AstPatchValidator", () => {
-	// ── validate() ───────────────────────────────────────────────────
-
 	describe("validate", () => {
 		it("allows new file creation (empty old content)", () => {
 			const result = AstPatchValidator.validate("write_to_file", "", "export function hello() { return 1; }")
@@ -122,8 +108,6 @@ describe("AstPatchValidator", () => {
 		})
 	})
 
-	// ── computeChangeRatio ───────────────────────────────────────────
-
 	describe("computeChangeRatio", () => {
 		it("returns 0 for identical content", () => {
 			const content = "line1\nline2\nline3"
@@ -149,8 +133,6 @@ describe("AstPatchValidator", () => {
 			expect(AstPatchValidator.computeChangeRatio("", "")).toBe(0)
 		})
 	})
-
-	// ── extractSymbols ───────────────────────────────────────────────
 
 	describe("extractSymbols", () => {
 		it("detects function declarations", () => {
@@ -199,8 +181,6 @@ describe("AstPatchValidator", () => {
 		})
 	})
 
-	// ── identifyChangedSymbols ───────────────────────────────────────
-
 	describe("identifyChangedSymbols", () => {
 		it("detects added symbols", () => {
 			const old = "function existing() { return 1 }\n"
@@ -224,8 +204,6 @@ describe("AstPatchValidator", () => {
 			expect(changed).toHaveLength(0)
 		})
 	})
-
-	// ── parseUnifiedDiff ─────────────────────────────────────────────
 
 	describe("parseUnifiedDiff", () => {
 		it("parses a single hunk", () => {
@@ -267,6 +245,78 @@ describe("AstPatchValidator", () => {
 		it("returns empty for non-diff text", () => {
 			const hunks = AstPatchValidator.parseUnifiedDiff("just some regular text")
 			expect(hunks).toHaveLength(0)
+		})
+	})
+
+	describe("patchMcpToolDefinitions", () => {
+		it("patches write_to_file tool description with enforcement warning", () => {
+			const tools = [
+				{ name: "write_to_file", description: "Write content to a file.", parameters: {} },
+				{ name: "read_file", description: "Read file contents.", parameters: {} },
+			]
+
+			const patched = AstPatchValidator.patchMcpToolDefinitions(tools)
+
+			expect(patched).toHaveLength(2)
+			expect(patched[0].description).toContain("AST-AWARE PATCH ENFORCEMENT")
+			expect(patched[0].description).toContain("Full-file rewrites on files with >15 lines are BLOCKED")
+			// read_file should not be patched
+			expect(patched[1].description).toBe("Read file contents.")
+		})
+
+		it("patches insert_content and create_file tools", () => {
+			const tools = [
+				{ name: "insert_content", description: "Insert content." },
+				{ name: "create_file", description: "Create a new file." },
+				{ name: "apply_diff", description: "Apply a unified diff." },
+			]
+
+			const patched = AstPatchValidator.patchMcpToolDefinitions(tools)
+
+			expect(patched[0].description).toContain("AST-AWARE PATCH ENFORCEMENT")
+			expect(patched[1].description).toContain("AST-AWARE PATCH ENFORCEMENT")
+			// apply_diff should NOT be patched (it's the preferred approach)
+			expect(patched[2].description).toBe("Apply a unified diff.")
+		})
+
+		it("preserves original tool properties", () => {
+			const tools = [
+				{
+					name: "write_to_file",
+					description: "Write to file.",
+					parameters: { type: "object", properties: { path: { type: "string" } } },
+				},
+			]
+
+			const patched = AstPatchValidator.patchMcpToolDefinitions(tools)
+
+			expect(patched[0].name).toBe("write_to_file")
+			expect(patched[0].parameters).toEqual({ type: "object", properties: { path: { type: "string" } } })
+		})
+
+		it("returns empty array for empty input", () => {
+			const patched = AstPatchValidator.patchMcpToolDefinitions([])
+			expect(patched).toEqual([])
+		})
+	})
+
+	describe("getToolDefinitionOverrides", () => {
+		it("returns overrides for write_to_file and insert_content", () => {
+			const overrides = AstPatchValidator.getToolDefinitionOverrides()
+
+			expect(overrides).toHaveProperty("write_to_file")
+			expect(overrides).toHaveProperty("insert_content")
+			expect(overrides.write_to_file).toContain("AST-AWARE PATCH ENFORCEMENT")
+			expect(overrides.write_to_file).toContain("intent_id")
+			expect(overrides.write_to_file).toContain("mutation_class")
+		})
+
+		it("does not include non-write tools", () => {
+			const overrides = AstPatchValidator.getToolDefinitionOverrides()
+
+			expect(overrides).not.toHaveProperty("read_file")
+			expect(overrides).not.toHaveProperty("apply_diff")
+			expect(overrides).not.toHaveProperty("execute_command")
 		})
 	})
 })

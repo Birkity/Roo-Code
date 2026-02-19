@@ -1,18 +1,9 @@
-/**
- * AutonomousRecovery.test.ts — Tests for Phase 2 Autonomous Recovery
- *
- * Tests that rejection events are correctly formatted as structured
- * JSON tool-errors for the AI model to self-correct.
- */
-
 import { describe, it, expect } from "vitest"
 import { AutonomousRecovery } from "../AutonomousRecovery"
 import { RiskTier } from "../CommandClassifier"
 import type { ClassificationResult } from "../CommandClassifier"
 
 describe("AutonomousRecovery", () => {
-	// ── formatRejection ──────────────────────────────────────────────
-
 	describe("formatRejection", () => {
 		it("formats rejection with correct error type", () => {
 			const classification: ClassificationResult = {
@@ -66,8 +57,6 @@ describe("AutonomousRecovery", () => {
 		})
 	})
 
-	// ── formatScopeViolation ─────────────────────────────────────────
-
 	describe("formatScopeViolation", () => {
 		it("formats scope violation with target path and owned scope", () => {
 			const result = AutonomousRecovery.formatScopeViolation(
@@ -97,8 +86,6 @@ describe("AutonomousRecovery", () => {
 		})
 	})
 
-	// ── formatHookError ──────────────────────────────────────────────
-
 	describe("formatHookError", () => {
 		it("formats generic hook errors", () => {
 			const result = AutonomousRecovery.formatHookError(
@@ -112,8 +99,6 @@ describe("AutonomousRecovery", () => {
 			expect(result).toContain("write_to_file")
 		})
 	})
-
-	// ── JSON Structure ───────────────────────────────────────────────
 
 	describe("JSON structure", () => {
 		it("produces valid parseable JSON within the XML tags", () => {

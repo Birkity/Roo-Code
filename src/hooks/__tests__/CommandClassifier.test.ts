@@ -1,16 +1,7 @@
-/**
- * CommandClassifier.test.ts — Tests for Phase 2 Command Classification
- *
- * Tests the classification of tool calls into risk tiers:
- * SAFE, DESTRUCTIVE, CRITICAL, META
- */
-
 import { describe, it, expect } from "vitest"
 import { CommandClassifier, RiskTier } from "../CommandClassifier"
 
 describe("CommandClassifier", () => {
-	// ── SAFE tools ────────────────────────────────────────────────────
-
 	describe("SAFE classification", () => {
 		it.each(["read_file", "list_files", "search_files", "codebase_search", "read_command_output"])(
 			"classifies %s as SAFE",
@@ -20,8 +11,6 @@ describe("CommandClassifier", () => {
 			},
 		)
 	})
-
-	// ── META tools ────────────────────────────────────────────────────
 
 	describe("META classification", () => {
 		it.each([
@@ -36,8 +25,6 @@ describe("CommandClassifier", () => {
 			expect(result.tier).toBe(RiskTier.META)
 		})
 	})
-
-	// ── DESTRUCTIVE tools ────────────────────────────────────────────
 
 	describe("DESTRUCTIVE classification", () => {
 		it.each(["write_to_file", "apply_diff", "edit", "search_and_replace", "edit_file", "apply_patch"])(
@@ -58,8 +45,6 @@ describe("CommandClassifier", () => {
 			expect(result.tier).toBe(RiskTier.DESTRUCTIVE)
 		})
 	})
-
-	// ── CRITICAL commands (execute_command) ──────────────────────────
 
 	describe("CRITICAL command classification", () => {
 		it("detects rm -rf as CRITICAL", () => {
@@ -135,8 +120,6 @@ describe("CommandClassifier", () => {
 			expect(result.tier).toBe(RiskTier.DESTRUCTIVE)
 		})
 	})
-
-	// ── isFileWriteOperation ─────────────────────────────────────────
 
 	describe("isFileWriteOperation", () => {
 		it("returns true for write_to_file", () => {

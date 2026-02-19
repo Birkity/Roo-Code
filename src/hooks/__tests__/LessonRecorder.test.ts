@@ -1,10 +1,3 @@
-/**
- * LessonRecorder.test.ts — Tests for Phase 4 lessons learned persistence.
- *
- * Validates: lesson recording, formatting, convenience methods,
- * brain file creation, section management, and pruning.
- */
-
 import * as fs from "node:fs"
 import * as path from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -12,14 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { LessonCategory, LessonRecorder } from "../LessonRecorder"
 import type { LessonEntry } from "../LessonRecorder"
 
-// ── Mocks ────────────────────────────────────────────────────────────────
-
 vi.mock("node:fs")
 
 const CWD = "/workspace"
 const BRAIN_PATH = path.join(CWD, "CLAUDE.md")
-
-// ── Helpers ──────────────────────────────────────────────────────────────
 
 function makeEntry(overrides: Partial<LessonEntry> = {}): LessonEntry {
 	return {
@@ -49,8 +38,6 @@ const BRAIN_CONTENT_WITH_SECTION = [
 	"",
 ].join("\n")
 
-// ── Tests ────────────────────────────────────────────────────────────────
-
 describe("LessonRecorder", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
@@ -59,8 +46,6 @@ describe("LessonRecorder", () => {
 	afterEach(() => {
 		vi.restoreAllMocks()
 	})
-
-	// ── formatLesson ─────────────────────────────────────────────────
 
 	describe("formatLesson", () => {
 		it("formats a lesson entry as Markdown", () => {
@@ -107,8 +92,6 @@ describe("LessonRecorder", () => {
 			expect(formatted).not.toContain("**Resolution**")
 		})
 	})
-
-	// ── record ───────────────────────────────────────────────────────
 
 	describe("record", () => {
 		it("creates CLAUDE.md with template if it does not exist", () => {
@@ -173,8 +156,6 @@ describe("LessonRecorder", () => {
 			expect(result.error).toContain("Disk full")
 		})
 	})
-
-	// ── Convenience Methods ──────────────────────────────────────────
 
 	describe("recordLintFailure", () => {
 		it("records a lint failure with error summary", () => {
@@ -262,8 +243,6 @@ describe("LessonRecorder", () => {
 			expect(result.success).toBe(true)
 		})
 	})
-
-	// ── LessonCategory enum ──────────────────────────────────────────
 
 	describe("LessonCategory", () => {
 		it("has all expected categories", () => {

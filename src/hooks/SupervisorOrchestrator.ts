@@ -1,37 +1,4 @@
-/**
- * SupervisorOrchestrator.ts — Phase 4: Hierarchical Manager-Worker Pattern
- *
- * Implements a Supervisor agent that reads the main specification and
- * spawns isolated sub-agents with narrow scopes. The Supervisor:
- *
- *   1. Decomposes complex tasks into isolated sub-tasks
- *   2. Assigns disjoint file scopes (Write Partitioning) to prevent collisions
- *   3. Injects minimal, compacted context into each sub-agent
- *   4. Awaits completion payloads from sub-agents
- *   5. Validates results against acceptance criteria
- *   6. Merges outcomes back into the master conversation
- *
- * Architecture:
- *
- *   ┌──────────────────────────────────────────────────────────────┐
- *   │                    SUPERVISOR AGENT                          │
- *   │  Reads: active_intents.yaml, intent_map.md, spec docs       │
- *   │  Role: Plan → Partition → Spawn → Await → Validate → Merge  │
- *   └──────────────────────────┬───────────────────────────────────┘
- *                              │ spawn isolated sub-agents
- *              ┌───────────────┼───────────────┐
- *              ▼               ▼               ▼
- *     ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
- *     │ Sub-Agent A  │ │ Sub-Agent B  │ │ Sub-Agent C  │
- *     │ "Architect"  │ │ "Builder"    │ │ "Tester"     │
- *     │ scope: docs/ │ │ scope: src/  │ │ scope: test/ │
- *     └──────────────┘ └──────────────┘ └──────────────┘
- *
- * @see ContextCompactor.ts — prepares compact context for sub-agents
- * @see OptimisticLock.ts — prevents write collisions between sub-agents
- * @see Research Paper: Hierarchical Supervision & State Ledgers
- * @see TRP1 Challenge Week 1, Phase 4: Supervisor Orchestration
- */
+/** Hierarchical manager-worker orchestrator that decomposes tasks into scoped sub-agents. */
 
 import * as fs from "node:fs"
 import * as path from "node:path"
@@ -40,12 +7,7 @@ import { v4 as uuidv4 } from "uuid"
 import { ContextCompactor } from "./ContextCompactor"
 import type { ConversationTurn, SubAgentContext } from "./ContextCompactor"
 
-// ── Types ────────────────────────────────────────────────────────────────
-
-/**
- * Role specializations for sub-agents.
- * Based on Boris Cherny's (Anthropic) parallel agent philosophy.
- */
+/** Role specializations for sub-agents. */
 export enum AgentRole {
 	ARCHITECT = "ARCHITECT",
 	BUILDER = "BUILDER",
@@ -54,9 +16,7 @@ export enum AgentRole {
 	DOCUMENTER = "DOCUMENTER",
 }
 
-/**
- * Status of a sub-task in the orchestration lifecycle.
- */
+/** Status of a sub-task in the orchestration lifecycle. */
 export enum SubTaskStatus {
 	PENDING = "PENDING",
 	IN_PROGRESS = "IN_PROGRESS",
@@ -65,9 +25,7 @@ export enum SubTaskStatus {
 	BLOCKED = "BLOCKED",
 }
 
-/**
- * A sub-task definition that the Supervisor delegates to a sub-agent.
- */
+/** A sub-task definition that the Supervisor delegates to a sub-agent. */
 export interface SubTask {
 	/** Unique sub-task identifier */
 	id: string
@@ -106,9 +64,7 @@ export interface SubTask {
 	priority: number
 }
 
-/**
- * Completion payload returned by a sub-agent.
- */
+/** Completion payload returned by a sub-agent. */
 export interface SubTaskCompletionPayload {
 	/** Files modified by the sub-agent */
 	modifiedFiles: string[]
@@ -133,9 +89,7 @@ export interface SubTaskCompletionPayload {
 	lessonsLearned: string[]
 }
 
-/**
- * Overall orchestration state maintained by the Supervisor.
- */
+/** Overall orchestration state maintained by the Supervisor. */
 export interface OrchestrationState {
 	/** Unique orchestration session ID */
 	sessionId: string
@@ -156,20 +110,9 @@ export interface OrchestrationState {
 	status: "PLANNING" | "EXECUTING" | "COMPLETED" | "FAILED"
 }
 
-// ── SupervisorOrchestrator ───────────────────────────────────────────────
-
-/**
- * Manages the hierarchical decomposition and orchestration of sub-agents.
- *
- * The Supervisor does NOT execute code itself — it plans, delegates,
- * and validates. Each sub-agent operates in isolation with:
- *   - A narrow file scope (write partitioning)
- *   - A compacted context (via ContextCompactor)
- *   - An assigned role (Architect, Builder, Tester, etc.)
- */
 export class SupervisorOrchestrator {
 	/** Current orchestration state */
-	private _state: OrchestrationState
+	private readonly _state: OrchestrationState
 
 	/** Workspace root */
 	private readonly cwd: string
@@ -191,14 +134,6 @@ export class SupervisorOrchestrator {
 		}
 	}
 
-	// ── Sub-Task Management ──────────────────────────────────────────
-
-	/**
-	 * Define a new sub-task for delegation to a sub-agent.
-	 *
-	 * The Supervisor calls this during the planning phase to break
-	 * the master intent into isolated, scoped sub-tasks.
-	 */
 	createSubTask(
 		description: string,
 		role: AgentRole,
@@ -228,15 +163,7 @@ export class SupervisorOrchestrator {
 		return subTask
 	}
 
-	/**
-	 * Prepare context and mark a sub-task as ready for execution.
-	 *
-	 * Builds a compacted, scope-restricted context using ContextCompactor.
-	 *
-	 * @param subTaskId       - The sub-task to prepare
-	 * @param parentTurns     - The supervisor's conversation history
-	 * @param intentContext   - Active intent XML block
-	 */
+	/** Prepare context and mark a sub-task as ready for execution. */
 	prepareSubTask(
 		subTaskId: string,
 		parentTurns: ConversationTurn[],
@@ -248,7 +175,6 @@ export class SupervisorOrchestrator {
 			return null
 		}
 
-		// Check dependencies
 		const unmetDeps = this.getUnmetDependencies(subTask)
 		if (unmetDeps.length > 0) {
 			subTask.status = SubTaskStatus.BLOCKED
@@ -257,10 +183,8 @@ export class SupervisorOrchestrator {
 			return null
 		}
 
-		// Build the task specification for the sub-agent
 		const taskSpec = this.buildSubAgentSpec(subTask)
 
-		// Prepare compacted context
 		const context = ContextCompactor.prepareSubAgentContext(
 			taskSpec,
 			subTask.assignedScope,
@@ -281,9 +205,6 @@ export class SupervisorOrchestrator {
 		return context
 	}
 
-	/**
-	 * Record the completion of a sub-task.
-	 */
 	completeSubTask(subTaskId: string, payload: SubTaskCompletionPayload): void {
 		const subTask = this.findSubTask(subTaskId)
 		if (!subTask) {
@@ -295,7 +216,6 @@ export class SupervisorOrchestrator {
 		subTask.status = payload.success ? SubTaskStatus.COMPLETED : SubTaskStatus.FAILED
 		subTask.completedAt = new Date().toISOString()
 
-		// Check if all sub-tasks are done
 		const allDone = this._state.subTasks.every(
 			(st) => st.status === SubTaskStatus.COMPLETED || st.status === SubTaskStatus.FAILED,
 		)
@@ -311,17 +231,7 @@ export class SupervisorOrchestrator {
 		console.log(`[Supervisor] Sub-task ${subTaskId} ${subTask.status}: ${payload.summary}`)
 	}
 
-	// ── Write Partitioning ───────────────────────────────────────────
-
-	/**
-	 * Validate that sub-task scopes are disjoint (no overlap).
-	 *
-	 * This is the "Write Partitioning" strategy from the research paper:
-	 * by assigning disjoint file spaces to different sub-agents, we
-	 * mathematically eliminate the possibility of spatial overlap.
-	 *
-	 * @returns Array of conflicts (empty means all scopes are disjoint)
-	 */
+	/** Validate that sub-task scopes are disjoint (no overlap). */
 	validateScopePartitioning(): Array<{ taskA: string; taskB: string; overlap: string[] }> {
 		const conflicts: Array<{ taskA: string; taskB: string; overlap: string[] }> = []
 		const tasks = this._state.subTasks
@@ -343,9 +253,6 @@ export class SupervisorOrchestrator {
 		return conflicts
 	}
 
-	/**
-	 * Find overlapping paths between two scope arrays.
-	 */
 	static findScopeOverlap(scopeA: string[], scopeB: string[]): string[] {
 		const overlap: string[] = []
 
@@ -363,43 +270,30 @@ export class SupervisorOrchestrator {
 		return overlap
 	}
 
-	/**
-	 * Check if a scope pattern contains (covers) a path.
-	 * Simple prefix-based check for directory patterns.
-	 */
+	/** Check if a scope pattern contains (covers) a path via prefix matching. */
 	private static scopeContains(scopePattern: string, targetPath: string): boolean {
-		// Exact match
 		if (scopePattern === targetPath) {
 			return true
 		}
 
-		// Directory glob: "src/auth/**" contains "src/auth/middleware.ts"
 		const baseDir = scopePattern.replace(/\*\*$/, "").replace(/\/+$/, "")
 		const targetDir = targetPath.replace(/\*\*$/, "").replace(/\/+$/, "")
 
 		return targetDir.startsWith(baseDir + "/") || baseDir.startsWith(targetDir + "/")
 	}
 
-	// ── Execution Order ──────────────────────────────────────────────
-
-	/**
-	 * Get sub-tasks in priority-based execution order,
-	 * respecting dependency constraints (topological sort).
-	 */
+	/** Get sub-tasks in execution order (topological sort by dependencies, then priority). */
 	getExecutionOrder(): SubTask[] {
 		const remaining = [...this._state.subTasks]
 		const ordered: SubTask[] = []
 		const completed = new Set<string>()
 
-		// Simple topological sort with priority
 		while (remaining.length > 0) {
-			// Find tasks whose dependencies are all completed
 			const ready = remaining
 				.filter((t) => t.dependsOn.every((dep) => completed.has(dep)))
 				.sort((a, b) => a.priority - b.priority)
 
 			if (ready.length === 0) {
-				// Circular dependency — add remaining in priority order
 				remaining.sort((a, b) => a.priority - b.priority)
 				ordered.push(...remaining)
 				break
@@ -413,8 +307,6 @@ export class SupervisorOrchestrator {
 
 		return ordered
 	}
-
-	// ── State Access ─────────────────────────────────────────────────
 
 	get state(): Readonly<OrchestrationState> {
 		return this._state
@@ -435,15 +327,10 @@ export class SupervisorOrchestrator {
 	private getUnmetDependencies(task: SubTask): string[] {
 		return task.dependsOn.filter((depId) => {
 			const dep = this.findSubTask(depId)
-			return !dep || dep.status !== SubTaskStatus.COMPLETED
+			return !dep?.status || dep.status !== SubTaskStatus.COMPLETED
 		})
 	}
 
-	// ── Sub-Agent Spec Building ──────────────────────────────────────
-
-	/**
-	 * Build the system prompt specification for a sub-agent.
-	 */
 	private buildSubAgentSpec(subTask: SubTask): string {
 		return [
 			`<sub_agent_specification>`,
@@ -464,12 +351,6 @@ export class SupervisorOrchestrator {
 		].join("\n")
 	}
 
-	// ── Persistence ──────────────────────────────────────────────────
-
-	/**
-	 * Persist the orchestration state to .orchestration/orchestration_state.json.
-	 * This acts as the centralized state ledger from the research paper.
-	 */
 	private persistState(): void {
 		try {
 			const stateDir = path.dirname(this.stateLedgerPath)
@@ -482,9 +363,6 @@ export class SupervisorOrchestrator {
 		}
 	}
 
-	/**
-	 * Load orchestration state from disk (for recovery/continuation).
-	 */
 	static loadState(cwd: string): OrchestrationState | null {
 		try {
 			const statePath = path.join(cwd, ".orchestration", "orchestration_state.json")
@@ -498,10 +376,6 @@ export class SupervisorOrchestrator {
 		}
 	}
 
-	/**
-	 * Generate a status report of the current orchestration.
-	 * Used for the Supervisor's decision-making and monitoring.
-	 */
 	generateStatusReport(): string {
 		const { subTasks, status, masterIntentId, sessionId } = this._state
 

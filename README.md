@@ -35,7 +35,7 @@
 - [简体中文](locales/zh-CN/README.md)
 - [繁體中文](locales/zh-TW/README.md)
 - ...
-  </details>
+    </details>
 
 ---
 
@@ -95,13 +95,13 @@ Learn more: [Using Modes](https://docs.roocode.com/basic-usage/using-modes) • 
 git clone https://github.com/RooCodeInc/Roo-Code.git
 ```
 
-2. **Install dependencies**:
+1. **Install dependencies**:
 
 ```sh
 pnpm install
 ```
 
-3. **Run the extension**:
+1. **Run the extension**:
 
 There are several ways to run the Roo Code extension:
 
@@ -139,12 +139,15 @@ Options:
 
 If you prefer to install the VSIX package manually:
 
-1.  First, build the VSIX package:
+1. First, build the VSIX package:
+
     ```sh
     pnpm vsix
     ```
-2.  A `.vsix` file will be generated in the `bin/` directory (e.g., `bin/roo-cline-<version>.vsix`).
-3.  Install it manually using the VSCode CLI:
+
+2. A `.vsix` file will be generated in the `bin/` directory (e.g., `bin/roo-cline-<version>.vsix`).
+3. Install it manually using the VSCode CLI:
+
     ```sh
     code --install-extension bin/roo-cline-<version>.vsix
     ```

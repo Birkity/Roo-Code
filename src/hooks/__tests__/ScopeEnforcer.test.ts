@@ -1,17 +1,8 @@
-/**
- * ScopeEnforcer.test.ts — Tests for Phase 2 Scope Enforcement
- *
- * Tests that file-write operations are correctly validated against
- * the active intent's owned_scope glob patterns.
- */
-
 import { describe, it, expect } from "vitest"
 import { ScopeEnforcer } from "../ScopeEnforcer"
 
 describe("ScopeEnforcer", () => {
 	const cwd = "/workspace/project"
-
-	// ── Glob Pattern Matching ────────────────────────────────────────
 
 	describe("scope pattern matching", () => {
 		it("allows files matching ** glob pattern", () => {
@@ -63,8 +54,6 @@ describe("ScopeEnforcer", () => {
 		})
 	})
 
-	// ── Path Normalization ───────────────────────────────────────────
-
 	describe("path normalization", () => {
 		it("normalizes Windows backslash paths", () => {
 			const result = ScopeEnforcer.check(String.raw`src\auth\middleware.ts`, ["src/auth/**"], cwd)
@@ -81,8 +70,6 @@ describe("ScopeEnforcer", () => {
 			expect(result.allowed).toBe(true)
 		})
 	})
-
-	// ── extractTargetPath ────────────────────────────────────────────
 
 	describe("extractTargetPath", () => {
 		it("extracts path from 'path' parameter", () => {

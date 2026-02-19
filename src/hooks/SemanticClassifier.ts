@@ -1,27 +1,10 @@
-/**
- * SemanticClassifier.ts — Phase 3: Mutation Class Discrimination
- *
- * Distinguishes AST_REFACTOR (intent preservation) from INTENT_EVOLUTION
- * (new feature/behavior) using a weighted mathematical scoring model:
- *
- *   Score = w₁·ΔImports + w₂·ΔExports + w₃·ΔSignatures + w₄·ΔLineCount + w₅·NewSymbols
- *
- *   Score ≥ 0.35 → INTENT_EVOLUTION
- *   Score < 0.35 → AST_REFACTOR
- *
- * @see TraceLogger.ts — uses mutation_class in trace records
- */
-
-// ── Types ────────────────────────────────────────────────────────────────
+/** Classifies code mutations as AST_REFACTOR or INTENT_EVOLUTION using weighted signal scoring. */
 
 export enum MutationClass {
 	AST_REFACTOR = "AST_REFACTOR",
 	INTENT_EVOLUTION = "INTENT_EVOLUTION",
 }
 
-/**
- * Detailed classification result with the mathematical breakdown.
- */
 export interface MutationClassification {
 	mutationClass: MutationClass
 	/** Composite score (0.0 – 1.0). Higher = more likely INTENT_EVOLUTION. */
@@ -31,10 +14,7 @@ export interface MutationClassification {
 	reasoning: string
 }
 
-/**
- * Individual classification signals and their weighted contributions.
- * Each signal is a normalized value between 0.0 and 1.0.
- */
+/** Each signal is a normalized value between 0.0 and 1.0. */
 export interface ClassificationSignals {
 	importDelta: number
 	exportDelta: number
@@ -43,12 +23,6 @@ export interface ClassificationSignals {
 	newSymbolRatio: number
 }
 
-// ── Constants ────────────────────────────────────────────────────────────
-
-/**
- * Weights for the classification scoring formula.
- * Score = Σ(wᵢ · signalᵢ) where Σwᵢ = 1.0
- */
 const WEIGHTS = {
 	importDelta: 0.1,
 	exportDelta: 0.25,
@@ -59,7 +33,7 @@ const WEIGHTS = {
 
 const EVOLUTION_THRESHOLD = 0.35
 
-/** All-max signals used for new file creation and agent override of empty files */
+/** Used for new file creation and agent override of empty files. */
 const MAX_SIGNALS: ClassificationSignals = {
 	importDelta: 1,
 	exportDelta: 1,
@@ -68,32 +42,21 @@ const MAX_SIGNALS: ClassificationSignals = {
 	newSymbolRatio: 1,
 }
 
-// ── Regex Patterns for Code Analysis ─────────────────────────────────────
-
-/** Matches import/require statements (full line) */
+/** Matches import/require statements. */
 const IMPORT_PATTERN = /^\s*(?:import\s|const\s+\w+\s*=\s*require\s*\(|from\s+['"]).*$/gm
 
-/** Matches export statements (full line) */
+/** Matches export statements. */
 const EXPORT_PATTERN =
 	/^\s*export\s+(?:default\s+|type\s+)?(?:function|class|const|let|var|interface|enum|abstract).*$/gm
 
-/** Matches function/method signatures */
+/** Matches function/method signatures. */
 const FUNCTION_KEYWORD_PATTERN = /(?:async\s+)?function\s+\w+/gm
 const ARROW_FUNCTION_PATTERN = /const\s+\w+\s*=\s*(?:async\s+)?\(/gm
 
-/** Matches identifiers (3+ chars) */
+/** Matches identifiers (3+ chars). */
 const IDENTIFIER_PATTERN = /\b[A-Za-z_$][A-Za-z0-9_$]{2,}\b/g
 
-// ── SemanticClassifier ───────────────────────────────────────────────────
-
-/**
- * Classifies code mutations as AST_REFACTOR or INTENT_EVOLUTION
- * using a weighted mathematical scoring model.
- */
 export class SemanticClassifier {
-	/**
-	 * Classify a mutation by comparing old and new file content.
-	 */
 	static classify(oldContent: string, newContent: string): MutationClassification {
 		if (oldContent.trim() === "") {
 			return SemanticClassifier.buildNewFileResult(newContent)
@@ -113,9 +76,6 @@ export class SemanticClassifier {
 		}
 	}
 
-	/**
-	 * Override with agent-provided mutation class, still computing signals for transparency.
-	 */
 	static classifyWithOverride(agentClass: string, oldContent: string, newContent: string): MutationClassification {
 		const normalized = agentClass.toUpperCase().trim()
 		const mutationClass =
@@ -140,11 +100,6 @@ export class SemanticClassifier {
 		}
 	}
 
-	// ── Signal Computation ───────────────────────────────────────────
-
-	/**
-	 * Compute all classification signals from old and new content.
-	 */
 	static computeSignals(oldContent: string, newContent: string): ClassificationSignals {
 		return {
 			importDelta: SemanticClassifier.computeImportDelta(oldContent, newContent),
@@ -155,9 +110,6 @@ export class SemanticClassifier {
 		}
 	}
 
-	/**
-	 * Compute the weighted composite score. Formula: Score = Σ(wᵢ · signalᵢ)
-	 */
 	static computeScore(signals: ClassificationSignals): number {
 		return (
 			WEIGHTS.importDelta * signals.importDelta +
@@ -168,12 +120,6 @@ export class SemanticClassifier {
 		)
 	}
 
-	// ── Individual Signal Extractors ─────────────────────────────────
-
-	/**
-	 * Compute the ratio of new imports added.
-	 * Returns 0.0 if no new imports, up to 1.0 if many new imports.
-	 */
 	private static computeImportDelta(oldContent: string, newContent: string): number {
 		const oldImports = SemanticClassifier.extractMatches(oldContent, IMPORT_PATTERN)
 		const newImports = SemanticClassifier.extractMatches(newContent, IMPORT_PATTERN)
@@ -184,10 +130,6 @@ export class SemanticClassifier {
 		return Math.min(added.length / Math.max(oldImports.length, 1), 1)
 	}
 
-	/**
-	 * Compute the ratio of new exports added.
-	 * New exports strongly indicate INTENT_EVOLUTION (new public API).
-	 */
 	private static computeExportDelta(oldContent: string, newContent: string): number {
 		const oldExports = SemanticClassifier.extractMatches(oldContent, EXPORT_PATTERN)
 		const newExports = SemanticClassifier.extractMatches(newContent, EXPORT_PATTERN)
@@ -198,10 +140,6 @@ export class SemanticClassifier {
 		return Math.min(added.length / Math.max(oldExports.length, 1), 1)
 	}
 
-	/**
-	 * Compute the ratio of new function/method signatures.
-	 * New signatures indicate new behavior → INTENT_EVOLUTION.
-	 */
 	private static computeSignatureDelta(oldContent: string, newContent: string): number {
 		const oldFns = SemanticClassifier.extractMatches(oldContent, FUNCTION_KEYWORD_PATTERN)
 		const oldArrows = SemanticClassifier.extractMatches(oldContent, ARROW_FUNCTION_PATTERN)
@@ -218,10 +156,6 @@ export class SemanticClassifier {
 		return Math.min(added.length / Math.max(oldSigs.length, 1), 1)
 	}
 
-	/**
-	 * Compute the relative expansion ratio of line count.
-	 * Large line count increases (>50%) suggest new content → INTENT_EVOLUTION.
-	 */
 	private static computeLineCountRatio(oldContent: string, newContent: string): number {
 		const oldLines = oldContent.split("\n").length
 		const newLines = newContent.split("\n").length
@@ -229,14 +163,9 @@ export class SemanticClassifier {
 			return 1
 		}
 		const ratio = (newLines - oldLines) / oldLines
-		// Normalize: 0 if same/smaller, caps at 1 for 100%+ expansion
 		return Math.min(Math.max(ratio, 0), 1)
 	}
 
-	/**
-	 * Compute the ratio of identifiers in new content that didn't exist in old.
-	 * High ratio = lots of new symbols → INTENT_EVOLUTION.
-	 */
 	private static computeNewSymbolRatio(oldContent: string, newContent: string): number {
 		const oldSymbols = new Set(SemanticClassifier.extractMatches(oldContent, IDENTIFIER_PATTERN))
 		const newSymbols = SemanticClassifier.extractMatches(newContent, IDENTIFIER_PATTERN)
@@ -246,16 +175,12 @@ export class SemanticClassifier {
 		}
 
 		const newOnly = newSymbols.filter((sym) => !oldSymbols.has(sym))
-		// Deduplicate new-only symbols for fair ratio
 		const uniqueNewOnly = new Set(newOnly)
 		const uniqueNew = new Set(newSymbols)
 
 		return Math.min(uniqueNewOnly.size / Math.max(uniqueNew.size, 1), 1)
 	}
 
-	// ── Helpers ──────────────────────────────────────────────────────
-
-	/** Extract all regex matches from content (trimmed). */
 	private static extractMatches(content: string, pattern: RegExp): string[] {
 		const regex = new RegExp(pattern.source, pattern.flags)
 		const matches: string[] = []
@@ -267,10 +192,6 @@ export class SemanticClassifier {
 		return matches
 	}
 
-	/**
-	 * Build a classification result for new file creation.
-	 * New files are always INTENT_EVOLUTION.
-	 */
 	private static buildNewFileResult(newContent: string): MutationClassification {
 		const lineCount = newContent.split("\n").length
 		return {
@@ -282,9 +203,6 @@ export class SemanticClassifier {
 		}
 	}
 
-	/**
-	 * Build a human-readable reasoning string from classification data.
-	 */
 	private static buildReasoning(mutationClass: MutationClass, score: number, signals: ClassificationSignals): string {
 		const parts: string[] = []
 

@@ -1,36 +1,9 @@
-/**
- * LessonRecorder.ts — Phase 4: Lessons Learned Persistence to CLAUDE.md
- *
- * Implements a tool that appends "Lessons Learned" to CLAUDE.md (the
- * shared brain) whenever a verification step (linter/test) fails. This
- * creates a persistent knowledge base shared across parallel sessions
- * (Architect/Builder/Tester), preventing repeated mistakes.
- *
- * The CLAUDE.md file acts as the "Shared Brain" from Boris Cherny's
- * parallel agent philosophy — it is the cross-session memory that
- * prevents context rot across agent lifetimes.
- *
- * Recording triggers:
- *   1. Linter failure (ESLint errors in PostToolHook)
- *   2. Test failure (test runner exits with non-zero)
- *   3. Build failure (compilation errors)
- *   4. Scope violation (attempt to write outside owned_scope)
- *   5. Optimistic lock conflict (stale file detected)
- *   6. Manual recording (agent decides something is worth remembering)
- *
- * @see PostToolHook.ts — triggers lesson recording on lint failures
- * @see HookEngine.ts — orchestrates post-hook lesson recording
- * @see TRP1 Challenge Week 1, Phase 4: Lesson Recording
- */
+/** Records lessons learned to CLAUDE.md for cross-session knowledge persistence. */
 
 import * as fs from "node:fs"
 import * as path from "node:path"
 
-// ── Types ────────────────────────────────────────────────────────────────
-
-/**
- * Category of lesson learned.
- */
+/** Category of lesson learned. */
 export enum LessonCategory {
 	LINT_FAILURE = "LINT_FAILURE",
 	TEST_FAILURE = "TEST_FAILURE",
@@ -42,9 +15,6 @@ export enum LessonCategory {
 	AGENT_INSIGHT = "AGENT_INSIGHT",
 }
 
-/**
- * A structured lesson learned entry.
- */
 export interface LessonEntry {
 	/** ISO timestamp */
 	timestamp: string
@@ -74,9 +44,6 @@ export interface LessonEntry {
 	severity: "info" | "warning" | "error"
 }
 
-/**
- * Result from recording a lesson.
- */
 export interface LessonResult {
 	success: boolean
 	filePath: string
@@ -84,54 +51,20 @@ export interface LessonResult {
 	error?: string
 }
 
-// ── Constants ────────────────────────────────────────────────────────────
-
-/** Default path for the shared brain file */
 const DEFAULT_BRAIN_FILE = "CLAUDE.md"
 
-/** Maximum number of lessons to store (prevents unbounded growth) */
 const MAX_LESSONS = 200
-
-/** Section header in CLAUDE.md for lessons */
 const LESSONS_SECTION = "## Lessons Learned"
 
-// ── LessonRecorder ───────────────────────────────────────────────────────
-
-/**
- * Records lessons learned to CLAUDE.md — the shared brain across agents.
- *
- * All methods are static for easy integration from any hook.
- */
 export class LessonRecorder {
-	// ── Primary API ──────────────────────────────────────────────────
-
-	/**
-	 * Record a lesson learned entry to CLAUDE.md.
-	 *
-	 * This is the primary entry point, called by:
-	 *   - PostToolHook when lint/format fails
-	 *   - HookEngine when tests fail
-	 *   - OptimisticLockManager on stale file conflicts
-	 *   - ScopeEnforcer on scope violations
-	 *
-	 * @param entry - The structured lesson to record
-	 * @param cwd   - Workspace root path
-	 * @returns LessonResult with success status
-	 */
 	static record(entry: LessonEntry, cwd: string): LessonResult {
 		const brainPath = path.join(cwd, DEFAULT_BRAIN_FILE)
 
 		try {
-			// Ensure the file exists with proper structure
 			LessonRecorder.ensureBrainFile(brainPath)
-
-			// Format the lesson as Markdown
 			const formatted = LessonRecorder.formatLesson(entry)
-
-			// Append to the Lessons Learned section
 			LessonRecorder.appendLesson(brainPath, formatted)
 
-			// Enforce max lessons (prune oldest if exceeded)
 			const currentCount = LessonRecorder.countLessons(brainPath)
 			if (currentCount > MAX_LESSONS) {
 				LessonRecorder.pruneOldestLessons(brainPath, currentCount - MAX_LESSONS)
@@ -156,11 +89,6 @@ export class LessonRecorder {
 		}
 	}
 
-	// ── Convenience Methods ──────────────────────────────────────────
-
-	/**
-	 * Record a linter failure lesson.
-	 */
 	static recordLintFailure(
 		filePath: string,
 		errors: Array<{ line: number; message: string }>,
@@ -188,9 +116,6 @@ export class LessonRecorder {
 		)
 	}
 
-	/**
-	 * Record a test failure lesson.
-	 */
 	static recordTestFailure(testCommand: string, stderr: string, intentId: string | null, cwd: string): LessonResult {
 		return LessonRecorder.record(
 			{
@@ -208,9 +133,6 @@ export class LessonRecorder {
 		)
 	}
 
-	/**
-	 * Record a scope violation lesson.
-	 */
 	static recordScopeViolation(
 		targetPath: string,
 		ownedScope: string[],
@@ -233,9 +155,6 @@ export class LessonRecorder {
 		)
 	}
 
-	/**
-	 * Record an optimistic lock conflict lesson.
-	 */
 	static recordLockConflict(
 		filePath: string,
 		baselineHash: string | null,
@@ -259,9 +178,6 @@ export class LessonRecorder {
 		)
 	}
 
-	/**
-	 * Record an architectural decision.
-	 */
 	static recordArchitecturalDecision(
 		decision: string,
 		rationale: string,
@@ -284,11 +200,6 @@ export class LessonRecorder {
 		)
 	}
 
-	// ── Formatting ───────────────────────────────────────────────────
-
-	/**
-	 * Format a LessonEntry as a Markdown block for CLAUDE.md.
-	 */
 	static formatLesson(entry: LessonEntry): string {
 		let severityEmoji = "ℹ️"
 		if (entry.severity === "error") {
@@ -318,11 +229,6 @@ export class LessonRecorder {
 		return lines.join("\n")
 	}
 
-	// ── File Management ──────────────────────────────────────────────
-
-	/**
-	 * Ensure CLAUDE.md exists with the proper structure.
-	 */
 	private static ensureBrainFile(filePath: string): void {
 		if (fs.existsSync(filePath)) {
 			const content = fs.readFileSync(filePath, "utf-8")
@@ -364,26 +270,17 @@ export class LessonRecorder {
 		fs.writeFileSync(filePath, initialContent, "utf-8")
 	}
 
-	/**
-	 * Append a formatted lesson to the Lessons Learned section.
-	 */
 	private static appendLesson(filePath: string, formattedLesson: string): void {
 		fs.appendFileSync(filePath, formattedLesson, "utf-8")
 	}
 
-	/**
-	 * Count the number of lesson entries in the file.
-	 */
 	private static countLessons(filePath: string): number {
 		const content = fs.readFileSync(filePath, "utf-8")
-		// Count "### " headings after the Lessons Learned section
 		const lessonsSection = content.split(LESSONS_SECTION)[1] ?? ""
 		return (lessonsSection.match(/^### /gm) ?? []).length
 	}
 
-	/**
-	 * Prune the oldest N lessons from the file to prevent unbounded growth.
-	 */
+	/** Removes the oldest N lessons to keep the file bounded. */
 	private static pruneOldestLessons(filePath: string, count: number): void {
 		const content = fs.readFileSync(filePath, "utf-8")
 		const parts = content.split(LESSONS_SECTION)
@@ -395,20 +292,12 @@ export class LessonRecorder {
 		const beforeSection = parts[0] + LESSONS_SECTION
 		const lessonsContent = parts[1]
 
-		// Split into individual lessons (each starts with "### ")
 		const lessonBlocks = lessonsContent.split(/(?=^### )/gm).filter((b) => b.trim().length > 0)
-
-		// Remove the oldest N lessons (they appear first)
 		const remaining = lessonBlocks.slice(count)
 
 		fs.writeFileSync(filePath, beforeSection + "\n\n" + remaining.join(""), "utf-8")
 	}
 
-	// ── Helpers ──────────────────────────────────────────────────────
-
-	/**
-	 * Extract ESLint rule names from error messages.
-	 */
 	private static extractRuleNames(errors: Array<{ line: number; message: string }>): string[] {
 		const rules = new Set<string>()
 		for (const err of errors) {

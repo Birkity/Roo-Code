@@ -1,8 +1,3 @@
-/**
- * SemanticClassifier.test.ts — Tests for Phase 3 mutation classification:
- * AST_REFACTOR vs INTENT_EVOLUTION, agent overrides, signal computation.
- */
-
 import { describe, it, expect } from "vitest"
 import { SemanticClassifier, MutationClass } from "../SemanticClassifier"
 

@@ -1,15 +1,4 @@
-/**
- * TraceLogger.ts — Phase 3: Agent Trace Serialization & Sidecar Persistence
- *
- * Builds Agent Trace JSON records (per agent-trace.dev spec), injects the
- * active Requirement ID into `related` (the "golden thread"), computes
- * SHA-256 content hashes, classifies mutations, and appends each record
- * to `.orchestration/agent_trace.jsonl` anchored to the current Git SHA.
- *
- * @see HashUtils.ts — content hashing
- * @see SemanticClassifier.ts — mutation classification
- * @see HookEngine.ts — orchestrates post-hook execution
- */
+/** Serializes Agent Trace records and persists them to `.orchestration/agent_trace.jsonl`. */
 
 import * as fs from "node:fs"
 import * as path from "node:path"
@@ -20,9 +9,6 @@ import { HashUtils } from "./HashUtils"
 import { SemanticClassifier, MutationClass } from "./SemanticClassifier"
 import type { MutationClassification } from "./SemanticClassifier"
 
-// ── Agent Trace Schema Types ─────────────────────────────────────────────
-
-/** Root-level Agent Trace record per the specification. */
 export interface AgentTraceRecord {
 	id: string
 	timestamp: string
@@ -69,9 +55,6 @@ export interface MutationMetadata {
 	reasoning: string
 }
 
-// ── TraceLogger Input ────────────────────────────────────────────────────
-
-/** Input parameters for recording a trace event. */
 export interface TraceInput {
 	toolName: string
 	params: Record<string, unknown>
@@ -84,7 +67,6 @@ export interface TraceInput {
 	agentMutationClass?: string
 }
 
-/** Result from recording a trace. */
 export interface TraceResult {
 	success: boolean
 	record: AgentTraceRecord | null
@@ -93,36 +75,12 @@ export interface TraceResult {
 	feedback: string
 }
 
-// ── Constants ────────────────────────────────────────────────────────────
-
-/** Default path for the agent trace ledger */
 const TRACE_FILE = ".orchestration/agent_trace.jsonl"
-
-/** Default model identifier when none is provided */
 const DEFAULT_MODEL = "unknown/model"
-
-/** Default session URL placeholder */
 const DEFAULT_SESSION_URL = "local://roo-code-session"
 
-// ── TraceLogger ──────────────────────────────────────────────────────────
-
-/**
- * Records Agent Trace entries to `.orchestration/agent_trace.jsonl`.
- *
- * This is the post-hook that fires after every file-writing tool execution,
- * building the "AI-Native Git Layer" that links Intent → Code → Hash.
- */
+/** Records Agent Trace entries to `.orchestration/agent_trace.jsonl`. */
 export class TraceLogger {
-	/**
-	 * Record a trace event for a file modification.
-	 *
-	 * This is the primary entry point called by HookEngine.runPostHooks()
-	 * after a write_to_file, apply_diff, or similar tool completes.
-	 *
-	 * @param input - All data needed to build the trace record
-	 * @param cwd   - Workspace root path
-	 * @returns TraceResult with the persisted record and feedback
-	 */
 	static async recordTrace(input: TraceInput, cwd: string): Promise<TraceResult> {
 		try {
 			const classification = TraceLogger.classifyMutation(input)
@@ -157,16 +115,12 @@ export class TraceLogger {
 		}
 	}
 
-	// ── Classification ───────────────────────────────────────────────
-
 	private static classifyMutation(input: TraceInput): MutationClassification {
 		if (input.agentMutationClass) {
 			return SemanticClassifier.classifyWithOverride(input.agentMutationClass, input.oldContent, input.newContent)
 		}
 		return SemanticClassifier.classify(input.oldContent, input.newContent)
 	}
-
-	// ── Trace Record Building ────────────────────────────────────────
 
 	private static buildTraceRecord(
 		input: TraceInput,
@@ -215,8 +169,6 @@ export class TraceLogger {
 		}
 	}
 
-	// ── Git Integration ──────────────────────────────────────────────
-
 	private static async getGitSha(cwd: string): Promise<string> {
 		try {
 			const git = simpleGit(cwd)
@@ -228,8 +180,6 @@ export class TraceLogger {
 		}
 	}
 
-	// ── Sidecar Persistence ──────────────────────────────────────────
-
 	private static appendToLedger(record: AgentTraceRecord, cwd: string): void {
 		const tracePath = path.join(cwd, TRACE_FILE)
 		const traceDir = path.dirname(tracePath)
@@ -240,8 +190,6 @@ export class TraceLogger {
 
 		fs.appendFileSync(tracePath, JSON.stringify(record) + "\n", "utf-8")
 	}
-
-	// ── Feedback Generation ──────────────────────────────────────────
 
 	private static buildFeedback(record: AgentTraceRecord, classification: MutationClassification): string {
 		const file = record.files[0]
@@ -264,15 +212,11 @@ export class TraceLogger {
 		].join("\n")
 	}
 
-	// ── Utilities ────────────────────────────────────────────────────
-
-	/** Normalize file path: backslashes → forward, strip leading ./ */
 	private static normalizeFilePath(filePath: string): string {
 		const normalized = filePath.replaceAll("\\", "/")
 		return normalized.startsWith("./") ? normalized.substring(2) : normalized
 	}
 
-	/** Read file content, or empty string if not found. */
 	static readOldContent(filePath: string, cwd: string): string {
 		try {
 			const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(cwd, filePath)
