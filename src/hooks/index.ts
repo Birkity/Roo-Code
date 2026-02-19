@@ -50,6 +50,9 @@ export type { PatchValidationResult, PatchTarget, DiffHunk } from "./AstPatchVal
 export { LessonRecorder, LessonCategory } from "./LessonRecorder"
 export type { LessonEntry, LessonResult } from "./LessonRecorder"
 
+export { IntentMapWriter } from "./IntentMapWriter"
+export type { IntentMap, IntentMapSection, IntentMapFileEntry, IntentMapUpdateResult } from "./IntentMapWriter"
+
 export { ContextCompactor } from "./ContextCompactor"
 export type { ConversationTurn, CompactionConfig, CompactionResult, SubAgentContext } from "./ContextCompactor"
 

@@ -13,11 +13,13 @@ import { AutonomousRecovery } from "./AutonomousRecovery"
 import { ScopeEnforcer } from "./ScopeEnforcer"
 import { PostToolHook } from "./PostToolHook"
 import { TraceLogger } from "./TraceLogger"
+import { IntentMapWriter } from "./IntentMapWriter"
 import { OptimisticLockManager } from "./OptimisticLock"
 import { AstPatchValidator } from "./AstPatchValidator"
 import { LessonRecorder } from "./LessonRecorder"
 import { SpecifyParser } from "./SpecifyParser"
 import type { HookContext, PreHookResult, IntentEntry, ActiveIntentsFile } from "./types"
+import type { AgentTraceRecord } from "./TraceLogger"
 
 export class HookEngine {
 	private readonly preHooks: Array<(ctx: HookContext) => Promise<PreHookResult>>
@@ -30,6 +32,7 @@ export class HookEngine {
 	private readonly _lockManager: OptimisticLockManager
 	private _sessionState: string | null = null
 	private _sessionStartTime: string | null = null
+	private _lastTraceRecord: AgentTraceRecord | null = null
 
 	constructor(cwd: string) {
 		this.cwd = cwd
@@ -209,6 +212,14 @@ export class HookEngine {
 			console.error(`[HookEngine] Trace recording error: ${errorMessage}`)
 		}
 
+		// Phase 3: Update intent_map.md on INTENT_EVOLUTION mutations
+		try {
+			await this.updateIntentMapIfNeeded(toolName, params)
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : "Unknown intent map error"
+			console.error(`[HookEngine] Intent map update error: ${errorMessage}`)
+		}
+
 		this.updateLockAfterWrite(toolName, params)
 
 		return feedbackParts.length > 0 ? feedbackParts.join("\n\n") : null
@@ -256,10 +267,37 @@ export class HookEngine {
 			this.cwd,
 		)
 
+		// Update intent_map.md if this was an INTENT_EVOLUTION
+		if (result.success && result.record) {
+			this._lastTraceRecord = result.record
+		}
+
 		// Clean up pre-write cache
 		this._preWriteContent.delete(filePath)
 
 		return result.feedback
+	}
+
+	/** Updates intent_map.md when the latest trace record is an INTENT_EVOLUTION mutation. */
+	private updateIntentMapIfNeeded(toolName: string, _params: Record<string, unknown>): void {
+		if (!HookEngine.TRACE_TOOLS.has(toolName)) {
+			return
+		}
+
+		if (!this._lastTraceRecord) {
+			return
+		}
+
+		const record = this._lastTraceRecord
+		this._lastTraceRecord = null // Consume the record
+
+		const result = IntentMapWriter.update(record, this.cwd)
+		if (result.success && result.fileEntryCount > 0) {
+			console.log(
+				`[HookEngine] Intent map updated: ${result.intentCount} intent(s), ` +
+					`${result.fileEntryCount} file(s)`,
+			)
+		}
 	}
 
 	private extractWriteFilePath(toolName: string, params: Record<string, unknown>): string | null {

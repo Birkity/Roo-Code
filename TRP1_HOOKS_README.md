@@ -29,7 +29,7 @@ _Date: February 2026_
 This project transforms Roo Code from a standard AI coding assistant into a **governed AI-Native IDE** with deterministic intent-code traceability. The hook system intercepts every tool call at two lifecycle phases:
 
 1. **PreToolUse** — Before execution: validates intent, classifies risk, enforces scope, checks concurrency, validates patches, requests human approval
-2. **PostToolUse** — After execution: auto-formats code, runs linting, records agent traces, persists lessons, updates lock state
+2. **PostToolUse** — After execution: auto-formats code, runs linting, records agent traces, updates intent map, persists lessons, updates lock state
 
 The system enforces a **Two-Stage State Machine** for every conversation turn:
 
@@ -38,8 +38,8 @@ The system enforces a **Two-Stage State Machine** for every conversation turn:
 
 **Key Metrics:**
 
-- 19 source files in `src/hooks/`
-- 270 tests across 13 test suites
+- 20 source files in `src/hooks/`
+- 300+ tests across 14 test suites
 - 5 implementation phases (0–5)
 - Full middleware pipeline: Gatekeeper → Context Loader → Classifier → Scope → Lock → AST Patch → AuthZ
 
@@ -59,10 +59,10 @@ The system enforces a **Two-Stage State Machine** for every conversation turn:
                        │  7. AuthorizationGate (HITL)          │     │  1. Prettier  │
                        └──────────────────────────────────────┘     │  2. ESLint    │
                                                                     │  3. Trace     │
-                              ┌────────────────┐                    │  4. Lesson    │
-                              │ On Rejection:  │                    │  5. Lock upd  │
-                              │ Autonomous     │                    └──────────────┘
-                              │ Recovery       │
+                              ┌────────────────┐                    │  4. IntentMap │
+                              │ On Rejection:  │                    │  5. Lesson    │
+                              │ Autonomous     │                    │  6. Lock upd  │
+                              │ Recovery       │                    └──────────────┘
                               └────────────────┘
 ```
 
@@ -602,22 +602,23 @@ src/hooks/
 
 ## Test Coverage
 
-| Phase   | Test File                        | Tests   | Covers                                                 |
-| ------- | -------------------------------- | ------- | ------------------------------------------------------ |
-| **1**   | `SessionState.test.ts`           | 10      | Session start/end, TASKS.md read/write, round-trip     |
-| **2**   | `CommandClassifier.test.ts`      | 36      | Risk tiers, command regex, file write detection        |
-| **2**   | `ScopeEnforcer.test.ts`          | 16      | Glob matching, path normalization, scope blocking      |
-| **2**   | `AutonomousRecovery.test.ts`     | 7       | Rejection formatting, scope violations, JSON structure |
-| **3**   | `HashUtils.test.ts`              | 19      | SHA-256, normalization, range hashing, verification    |
-| **3**   | `SemanticClassifier.test.ts`     | 20      | Classification scoring, signals, override tracking     |
-| **3**   | `TraceLogger.test.ts`            | 15      | Trace records, golden thread, JSONL persistence        |
-| **3/5** | `SpecifyParser.test.ts`          | 21      | Frontmatter/heading/inline extraction, sections        |
-| **4**   | `OptimisticLock.test.ts`         | 23      | Hash capture, validation, agent scoping, ring buffer   |
-| **4**   | `AstPatchValidator.test.ts`      | 31      | Rewrites, diffs, symbols, MCP tool patching            |
-| **4**   | `LessonRecorder.test.ts`         | 17      | Lesson formatting, CLAUDE.md management, categories    |
-| **4**   | `ContextCompactor.test.ts`       | 25      | Truncation, tokens, summarization, sub-agent context   |
-| **4**   | `SupervisorOrchestrator.test.ts` | 30      | Sub-tasks, scopes, dependencies, state persistence     |
-|         | **Total**                        | **270** |                                                        |
+| Phase   | Test File                        | Tests    | Covers                                                 |
+| ------- | -------------------------------- | -------- | ------------------------------------------------------ |
+| **1**   | `SessionState.test.ts`           | 10       | Session start/end, TASKS.md read/write, round-trip     |
+| **2**   | `CommandClassifier.test.ts`      | 36       | Risk tiers, command regex, file write detection        |
+| **2**   | `ScopeEnforcer.test.ts`          | 16       | Glob matching, path normalization, scope blocking      |
+| **2**   | `AutonomousRecovery.test.ts`     | 7        | Rejection formatting, scope violations, JSON structure |
+| **3**   | `HashUtils.test.ts`              | 19       | SHA-256, normalization, range hashing, verification    |
+| **3**   | `SemanticClassifier.test.ts`     | 20       | Classification scoring, signals, override tracking     |
+| **3**   | `TraceLogger.test.ts`            | 15       | Trace records, golden thread, JSONL persistence        |
+| **3**   | `IntentMapWriter.test.ts`        | 30+      | Spatial map gen, incremental update, round-trip parse  |
+| **3/5** | `SpecifyParser.test.ts`          | 21       | Frontmatter/heading/inline extraction, sections        |
+| **4**   | `OptimisticLock.test.ts`         | 23       | Hash capture, validation, agent scoping, ring buffer   |
+| **4**   | `AstPatchValidator.test.ts`      | 31       | Rewrites, diffs, symbols, MCP tool patching            |
+| **4**   | `LessonRecorder.test.ts`         | 17       | Lesson formatting, CLAUDE.md management, categories    |
+| **4**   | `ContextCompactor.test.ts`       | 25       | Truncation, tokens, summarization, sub-agent context   |
+| **4**   | `SupervisorOrchestrator.test.ts` | 30       | Sub-tasks, scopes, dependencies, state persistence     |
+|         | **Total**                        | **300+** |                                                        |
 
 ---
 
@@ -629,6 +630,7 @@ The hook system maintains a sidecar storage pattern:
 .orchestration/
 ├── active_intents.yaml       # Intent specifications (YAML)
 ├── agent_trace.jsonl         # Append-only action ledger
+├── intent_map.md             # Spatial map: intent → files/AST (auto-generated)
 ├── orchestration_state.json  # Supervisor sub-task state
 ├── TASKS.md                  # Session state continuity
 └── CLAUDE.md                 # Shared brain (lessons learned)
@@ -704,6 +706,39 @@ status: IN_PROGRESS
 - User can log in with email/password
 ```
 
+### intent_map.md (The Spatial Map)
+
+Auto-generated by `IntentMapWriter` (`IntentMapWriter.ts`). Maps business intents to physical files and AST ranges. Updated incrementally when `INTENT_EVOLUTION` mutations occur (as classified by `SemanticClassifier`).
+
+**Purpose:** When a manager asks "Where is the billing logic?", this file provides the answer. It creates a bidirectional, queryable link: Intent → Files → Content Hashes, enabling spatial-independence (if code moves, the hash still tracks it).
+
+**Update Pattern:** Incrementally updated in the `PostToolUse` pipeline after `TraceLogger` records a trace. Only `INTENT_EVOLUTION` mutations trigger an update — `AST_REFACTOR` is skipped.
+
+**Regeneration:** Can be fully rebuilt from `agent_trace.jsonl` using `IntentMapWriter.regenerate(cwd)`.
+
+```markdown
+# Intent Map — Spatial Index
+
+> Auto-generated by the Hook Engine.
+> Updated incrementally when `INTENT_EVOLUTION` mutations occur.
+> Content hashes provide spatial independence.
+
+---
+
+## INT-001: JWT Authentication Migration
+
+| File                     | Content Hash           | Lines | Mutation         | Git SHA    | Last Updated        |
+| ------------------------ | ---------------------- | ----- | ---------------- | ---------- | ------------------- |
+| `src/auth/middleware.ts` | `sha256:a8f5f167f44f…` | 1–45  | INTENT_EVOLUTION | `abc123de` | 2026-02-16T12:00:00 |
+| `src/auth/jwt.ts`        | `sha256:deadbeefcafe…` | 1–30  | INTENT_EVOLUTION | `def45678` | 2026-02-16T13:00:00 |
+
+## INT-002: Refactor Auth Middleware
+
+| File                             | Content Hash        | Lines | Mutation         | Git SHA    | Last Updated        |
+| -------------------------------- | ------------------- | ----- | ---------------- | ---------- | ------------------- |
+| `src/middleware/rate-limiter.ts` | `sha256:ratelimit…` | 1–25  | INTENT_EVOLUTION | `ghij9012` | 2026-02-16T14:00:00 |
+```
+
 ---
 
 ## How to Run Tests
@@ -759,6 +794,7 @@ User Request
 │  │ Prettier      │  │ TraceLogger   │  │ LessonRecorder     │   │
 │  │ ESLint        │  │ HashUtils     │  │ Lock Update        │   │
 │  │               │  │ Classifier    │  │                    │   │
+│  │               │  │ IntentMapWriter│  │                    │   │
 │  └──────────────┘  └───────────────┘  └────────────────────┘   │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -790,7 +826,7 @@ HookEngine → Gatekeeper: ALLOW (intent active)
            → AuthorizationGate: [user approves]
   │
   ▼
-Tool executes → PostHooks fire (format, trace, lesson)
+Tool executes → PostHooks fire (format, trace, intent map, lesson)
 ```
 
 ---
@@ -802,7 +838,7 @@ Tool executes → PostHooks fire (format, trace, lesson)
 | **0** | Archaeological Dig     | Map Roo Code internals                          | ARCHITECTURE_NOTES.md                                                                       | —              |
 | **1** | The Handshake          | Force intent declaration before code            | HookEngine, Gatekeeper, IntentContextLoader, types.ts                                       | 10             |
 | **2** | Security Boundary      | Risk classification + HITL + scope + quality    | CommandClassifier, AuthorizationGate, ScopeEnforcer, PostToolHook, AutonomousRecovery       | 59             |
-| **3** | AI-Native Git Layer    | Intent-code traceability via hashing & traces   | HashUtils, SemanticClassifier, TraceLogger, SpecifyParser                                   | 75             |
+| **3** | AI-Native Git Layer    | Intent-code traceability via hashing & traces   | HashUtils, SemanticClassifier, TraceLogger, SpecifyParser, **IntentMapWriter**              | 105+           |
 | **4** | Parallel Orchestration | Multi-agent concurrency, context, supervision   | OptimisticLock, AstPatchValidator, LessonRecorder, ContextCompactor, SupervisorOrchestrator | 126            |
 | **5** | Gap Closure            | Session state, .specify/ fallback, MCP patching | Additions to HookEngine, IntentContextLoader, AstPatchValidator, write_to_file.ts           | Included above |
-|       | **Total**              |                                                 | **19 source files**                                                                         | **270**        |
+|       | **Total**              |                                                 | **20 source files**                                                                         | **300+**       |
