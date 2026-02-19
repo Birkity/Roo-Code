@@ -1,15 +1,6 @@
 /**
- * TraceLogger.test.ts — Tests for Phase 3 Agent Trace Serialization
- *
- * Validates:
- * - Agent Trace JSON schema conformance
- * - Intent ID injection into related array ("golden thread")
- * - Content hash injection into ranges
- * - Mutation classification in trace records
- * - File path normalization
- * - JSONL sidecar persistence
- * - Git SHA retrieval (mocked)
- * - Old content reading
+ * TraceLogger.test.ts — Tests for Phase 3 Agent Trace serialization:
+ * Schema compliance, intent ID injection, content hashing, JSONL persistence.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"

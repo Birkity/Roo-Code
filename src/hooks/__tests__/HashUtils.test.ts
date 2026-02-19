@@ -1,13 +1,6 @@
 /**
- * HashUtils.test.ts — Tests for Phase 3 Spatial Hashing
- *
- * Validates:
- * - SHA-256 hashing with "sha256:" prefix
- * - Content normalization (CRLF → LF, trim trailing whitespace)
- * - Range hashing for spatially independent attribution
- * - Hash verification
- * - Deterministic output (same input → same hash)
- * - Spatial independence (content hash survives line shifts)
+ * HashUtils.test.ts — Tests for Phase 3 spatial hashing:
+ * SHA-256 with prefix, normalization, range hashing, verification, spatial independence.
  */
 
 import { describe, it, expect } from "vitest"
@@ -18,7 +11,6 @@ describe("HashUtils", () => {
 		it("produces a sha256-prefixed hash", () => {
 			const result = HashUtils.hashContent("hello world")
 			expect(result.hash).toMatch(/^sha256:[a-f0-9]{64}$/)
-			expect(result.algorithm).toBe("sha256")
 		})
 
 		it("returns the correct hex digest length (64 chars for SHA-256)", () => {

@@ -1,52 +1,21 @@
 /**
  * SemanticClassifier.ts — Phase 3: Mutation Class Discrimination
  *
- * Distinguishes between two fundamental types of code mutation:
- *
- *   1. AST_REFACTOR (Intent Preservation)
- *      - The code structure changes but the business intent stays the same.
- *      - Examples: renaming variables, extracting functions, reformatting.
- *      - Mathematically: the hash of the normalized AST changes, but
- *        the semantic intent map entry does NOT require update.
- *
- *   2. INTENT_EVOLUTION (New Feature / Behavior Change)
- *      - The code changes introduce new business logic or modify behavior.
- *      - Examples: adding a new endpoint, changing validation rules.
- *      - Mathematically: the intent_map.md MUST be updated.
- *
- * Mathematical Discrimination:
- *   We use a heuristic scoring model based on measurable code characteristics:
+ * Distinguishes AST_REFACTOR (intent preservation) from INTENT_EVOLUTION
+ * (new feature/behavior) using a weighted mathematical scoring model:
  *
  *   Score = w₁·ΔImports + w₂·ΔExports + w₃·ΔSignatures + w₄·ΔLineCount + w₅·NewSymbols
  *
- *   Where:
- *   - ΔImports    = change in import/require statements (new dependencies)
- *   - ΔExports    = change in exported symbols (new public API surface)
- *   - ΔSignatures = change in function/method signatures (new behavior)
- *   - ΔLineCount  = relative change in line count (expansion ratio)
- *   - NewSymbols  = new identifiers not present in original
+ *   Score ≥ 0.35 → INTENT_EVOLUTION
+ *   Score < 0.35 → AST_REFACTOR
  *
- *   If Score ≥ EVOLUTION_THRESHOLD → INTENT_EVOLUTION
- *   If Score <  EVOLUTION_THRESHOLD → AST_REFACTOR
- *
- * The rubric demands: "Distinguishes Refactors from Features mathematically."
- * This weighted scoring model provides that mathematical basis.
- *
- * @see TraceLogger.ts   — uses mutation_class in trace records
- * @see TRP1 Challenge Week 1, Phase 3 — Semantic Classification
- * @see Research Paper, Phase 3 — Intent Extraction
+ * @see TraceLogger.ts — uses mutation_class in trace records
  */
 
 // ── Types ────────────────────────────────────────────────────────────────
 
-/**
- * The two possible mutation classifications per the TRP1 spec.
- */
 export enum MutationClass {
-	/** Syntax change with same intent — rename, extract, reformat */
 	AST_REFACTOR = "AST_REFACTOR",
-
-	/** New feature or behavior change — new endpoint, new logic */
 	INTENT_EVOLUTION = "INTENT_EVOLUTION",
 }
 
@@ -54,19 +23,11 @@ export enum MutationClass {
  * Detailed classification result with the mathematical breakdown.
  */
 export interface MutationClassification {
-	/** The determined mutation class */
 	mutationClass: MutationClass
-
 	/** Composite score (0.0 – 1.0). Higher = more likely INTENT_EVOLUTION. */
 	score: number
-
-	/** Threshold used for the decision */
 	threshold: number
-
-	/** Breakdown of individual signal scores for transparency */
 	signals: ClassificationSignals
-
-	/** Human-readable reasoning */
 	reasoning: string
 }
 
@@ -75,19 +36,10 @@ export interface MutationClassification {
  * Each signal is a normalized value between 0.0 and 1.0.
  */
 export interface ClassificationSignals {
-	/** Ratio of new import statements added */
 	importDelta: number
-
-	/** Ratio of new export statements added */
 	exportDelta: number
-
-	/** Ratio of new function/method signatures */
 	signatureDelta: number
-
-	/** Relative line count expansion ratio */
 	lineCountRatio: number
-
-	/** Ratio of new identifiers not present in original */
 	newSymbolRatio: number
 }
 
@@ -95,9 +47,6 @@ export interface ClassificationSignals {
 
 /**
  * Weights for the classification scoring formula.
- * These are tuned to favor detecting new behavior (exports, signatures)
- * over structural changes (line count, imports).
- *
  * Score = Σ(wᵢ · signalᵢ) where Σwᵢ = 1.0
  */
 const WEIGHTS = {
@@ -108,27 +57,31 @@ const WEIGHTS = {
 	newSymbolRatio: 0.25,
 } as const
 
-/**
- * Threshold for classifying as INTENT_EVOLUTION.
- * Score ≥ threshold → INTENT_EVOLUTION
- * Score <  threshold → AST_REFACTOR
- */
 const EVOLUTION_THRESHOLD = 0.35
+
+/** All-max signals used for new file creation and agent override of empty files */
+const MAX_SIGNALS: ClassificationSignals = {
+	importDelta: 1,
+	exportDelta: 1,
+	signatureDelta: 1,
+	lineCountRatio: 1,
+	newSymbolRatio: 1,
+}
 
 // ── Regex Patterns for Code Analysis ─────────────────────────────────────
 
-/** Matches import/require statements (full line for distinct comparison) */
+/** Matches import/require statements (full line) */
 const IMPORT_PATTERN = /^\s*(?:import\s|const\s+\w+\s*=\s*require\s*\(|from\s+['"]).*$/gm
 
-/** Matches export statements (named, default, type — full line for distinct comparison) */
+/** Matches export statements (full line) */
 const EXPORT_PATTERN =
 	/^\s*export\s+(?:default\s+|type\s+)?(?:function|class|const|let|var|interface|enum|abstract).*$/gm
 
-/** Matches function/method signatures — simplified to reduce regex complexity */
+/** Matches function/method signatures */
 const FUNCTION_KEYWORD_PATTERN = /(?:async\s+)?function\s+\w+/gm
 const ARROW_FUNCTION_PATTERN = /const\s+\w+\s*=\s*(?:async\s+)?\(/gm
 
-/** Matches identifiers (variable names, function names, class names) */
+/** Matches identifiers (3+ chars) */
 const IDENTIFIER_PATTERN = /\b[A-Za-z_$][A-Za-z0-9_$]{2,}\b/g
 
 // ── SemanticClassifier ───────────────────────────────────────────────────
@@ -140,44 +93,15 @@ const IDENTIFIER_PATTERN = /\b[A-Za-z_$][A-Za-z0-9_$]{2,}\b/g
 export class SemanticClassifier {
 	/**
 	 * Classify a mutation by comparing old and new file content.
-	 *
-	 * @param oldContent - The file content before modification (empty string for new files)
-	 * @param newContent - The file content after modification
-	 * @returns MutationClassification with score, signals, and reasoning
-	 *
-	 * @example
-	 * ```ts
-	 * // Renaming a variable — should be AST_REFACTOR
-	 * const result = SemanticClassifier.classify(
-	 *   "const oldName = 42;",
-	 *   "const newName = 42;"
-	 * )
-	 * // result.mutationClass === MutationClass.AST_REFACTOR
-	 *
-	 * // Adding a new exported function — should be INTENT_EVOLUTION
-	 * const result2 = SemanticClassifier.classify(
-	 *   "",
-	 *   "export function newFeature() { return 'hello'; }"
-	 * )
-	 * // result2.mutationClass === MutationClass.INTENT_EVOLUTION
-	 * ```
 	 */
 	static classify(oldContent: string, newContent: string): MutationClassification {
-		// New file creation is always INTENT_EVOLUTION
 		if (oldContent.trim() === "") {
 			return SemanticClassifier.buildNewFileResult(newContent)
 		}
 
-		// Compute individual signals
 		const signals = SemanticClassifier.computeSignals(oldContent, newContent)
-
-		// Compute weighted composite score
 		const score = SemanticClassifier.computeScore(signals)
-
-		// Determine classification
 		const mutationClass = score >= EVOLUTION_THRESHOLD ? MutationClass.INTENT_EVOLUTION : MutationClass.AST_REFACTOR
-
-		// Build reasoning explanation
 		const reasoning = SemanticClassifier.buildReasoning(mutationClass, score, signals)
 
 		return {
@@ -190,16 +114,7 @@ export class SemanticClassifier {
 	}
 
 	/**
-	 * Provide an explicit mutation class override.
-	 *
-	 * When the AI agent provides `mutation_class` in the tool params,
-	 * we use it directly but still compute the mathematical score
-	 * for validation and transparency.
-	 *
-	 * @param agentClass  - The mutation class declared by the agent
-	 * @param oldContent  - Previous file content
-	 * @param newContent  - New file content
-	 * @returns MutationClassification using agent's class with computed signals
+	 * Override with agent-provided mutation class, still computing signals for transparency.
 	 */
 	static classifyWithOverride(agentClass: string, oldContent: string, newContent: string): MutationClassification {
 		const normalized = agentClass.toUpperCase().trim()
@@ -207,9 +122,7 @@ export class SemanticClassifier {
 			normalized === "AST_REFACTOR" ? MutationClass.AST_REFACTOR : MutationClass.INTENT_EVOLUTION
 
 		const signals =
-			oldContent.trim() === ""
-				? { importDelta: 1, exportDelta: 1, signatureDelta: 1, lineCountRatio: 1, newSymbolRatio: 1 }
-				: SemanticClassifier.computeSignals(oldContent, newContent)
+			oldContent.trim() === "" ? MAX_SIGNALS : SemanticClassifier.computeSignals(oldContent, newContent)
 
 		const score = SemanticClassifier.computeScore(signals)
 
@@ -243,9 +156,7 @@ export class SemanticClassifier {
 	}
 
 	/**
-	 * Compute the weighted composite score from individual signals.
-	 *
-	 * Formula: Score = Σ(wᵢ · signalᵢ)
+	 * Compute the weighted composite score. Formula: Score = Σ(wᵢ · signalᵢ)
 	 */
 	static computeScore(signals: ClassificationSignals): number {
 		return (
@@ -344,22 +255,15 @@ export class SemanticClassifier {
 
 	// ── Helpers ──────────────────────────────────────────────────────
 
-	/**
-	 * Extract all matches for a given regex pattern from content.
-	 * Returns an array of matched strings (trimmed).
-	 */
+	/** Extract all regex matches from content (trimmed). */
 	private static extractMatches(content: string, pattern: RegExp): string[] {
-		// Create a new regex to avoid state issues with global flag
 		const regex = new RegExp(pattern.source, pattern.flags)
 		const matches: string[] = []
-		let match: RegExpExecArray | null
-
-		match = regex.exec(content)
+		let match = regex.exec(content)
 		while (match !== null) {
 			matches.push(match[0].trim())
 			match = regex.exec(content)
 		}
-
 		return matches
 	}
 
@@ -373,13 +277,7 @@ export class SemanticClassifier {
 			mutationClass: MutationClass.INTENT_EVOLUTION,
 			score: 1,
 			threshold: EVOLUTION_THRESHOLD,
-			signals: {
-				importDelta: 1,
-				exportDelta: 1,
-				signatureDelta: 1,
-				lineCountRatio: 1,
-				newSymbolRatio: 1,
-			},
+			signals: MAX_SIGNALS,
 			reasoning: `New file creation (${lineCount} lines). All signals max → INTENT_EVOLUTION.`,
 		}
 	}

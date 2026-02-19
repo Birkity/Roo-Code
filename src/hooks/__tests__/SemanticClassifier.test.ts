@@ -1,13 +1,6 @@
 /**
- * SemanticClassifier.test.ts — Tests for Phase 3 Mutation Classification
- *
- * Validates:
- * - New file creation → INTENT_EVOLUTION
- * - Pure rename/refactor → AST_REFACTOR
- * - Adding new exports/functions → INTENT_EVOLUTION
- * - Agent override with agreement/disagreement tracking
- * - Mathematical score computation
- * - Signal breakdown transparency
+ * SemanticClassifier.test.ts — Tests for Phase 3 mutation classification:
+ * AST_REFACTOR vs INTENT_EVOLUTION, agent overrides, signal computation.
  */
 
 import { describe, it, expect } from "vitest"
