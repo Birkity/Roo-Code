@@ -6,22 +6,26 @@
  * hook pipeline that intercepts every tool call at two lifecycle phases:
  *
  *   1. PreToolUse  — Before the tool executes (validation, context injection,
- *                    command classification, HITL authorization, scope enforcement)
- *   2. PostToolUse — After the tool executes (auto-format, lint, tracing)
+ *                    command classification, HITL authorization, scope enforcement,
+ *                    optimistic locking, AST-aware patch validation)
+ *   2. PostToolUse — After the tool executes (auto-format, lint, tracing,
+ *                    lesson recording, lock state update)
  *
- * Architecture (Phase 2):
- * ┌────────────────┐     ┌──────────────────────────────────┐     ┌──────────────┐
- * │ AI Model       │────▷│ HookEngine — PreToolUse          │────▷│ Tool Handler │
- * │ (tool_use)     │     │  1. Gatekeeper (intent check)    │     │ .handle()    │
- * └────────────────┘     │  2. IntentContextLoader          │     └──────────────┘
- *                        │  3. CommandClassifier             │            │
- *                        │  4. ScopeEnforcer                 │            ▼
- *                        │  5. AuthorizationGate (HITL)      │     ┌──────────────┐
- *                        └──────────────────────────────────┘     │ PostToolUse  │
- *                                                                 │  1. Prettier  │
- *                               ┌────────────────┐               │  2. ESLint    │
- *                               │ On Rejection:  │               └──────────────┘
- *                               │ Autonomous     │
+ * Architecture (Phase 1–4):
+ * ┌────────────────┐     ┌──────────────────────────────────────┐     ┌──────────────┐
+ * │ AI Model       │────▷│ HookEngine — PreToolUse              │────▷│ Tool Handler │
+ * │ (tool_use)     │     │  1. Gatekeeper (intent check)        │     │ .handle()    │
+ * └────────────────┘     │  2. IntentContextLoader              │     └──────────────┘
+ *                        │  3. CommandClassifier                 │            │
+ *                        │  4. ScopeEnforcer                     │            ▼
+ *                        │  5. OptimisticLock (stale file check) │     ┌──────────────┐
+ *                        │  6. AstPatchValidator (rewrite check) │     │ PostToolUse  │
+ *                        │  7. AuthorizationGate (HITL)          │     │  1. Prettier  │
+ *                        └──────────────────────────────────────┘     │  2. ESLint    │
+ *                                                                     │  3. Trace     │
+ *                               ┌────────────────┐                   │  4. Lesson    │
+ *                               │ On Rejection:  │                   │  5. Lock upd  │
+ *                               │ Autonomous     │                   └──────────────┘
  *                               │ Recovery       │
  *                               └────────────────┘
  *
@@ -41,6 +45,13 @@
  * - Post-Edit Automation (Prettier + ESLint on modified files)
  * - .intentignore support for bypassing authorization on select intents
  *
+ * Phase 4 Additions:
+ * - Optimistic Locking via content hash comparison (stale file detection)
+ * - AST-Aware Patch Validation (block full-file rewrites in favor of diffs)
+ * - Lesson Recording to CLAUDE.md on verification failures
+ * - Context Compaction for sub-agent spawning
+ * - Supervisor Orchestration support (write partitioning, state ledger)
+ *
  * @see IntentContextLoader.ts — Pre-hook for loading intent context
  * @see PreToolHook.ts — Gatekeeper pre-hook for intent validation
  * @see CommandClassifier.ts — Risk tier classification
@@ -48,7 +59,12 @@
  * @see AutonomousRecovery.ts — Structured rejection errors
  * @see ScopeEnforcer.ts — Owned scope validation
  * @see PostToolHook.ts — Post-edit formatting/linting
- * @see TRP1 Challenge Week 1, Phase 1 & Phase 2
+ * @see OptimisticLock.ts — Phase 4 concurrency control
+ * @see AstPatchValidator.ts — Phase 4 targeted patch enforcement
+ * @see LessonRecorder.ts — Phase 4 lessons learned persistence
+ * @see ContextCompactor.ts — Phase 4 context compaction
+ * @see SupervisorOrchestrator.ts — Phase 4 hierarchical orchestration
+ * @see TRP1 Challenge Week 1, Phase 1 – Phase 4
  */
 
 import * as fs from "node:fs"
@@ -64,6 +80,9 @@ import { AutonomousRecovery } from "./AutonomousRecovery"
 import { ScopeEnforcer } from "./ScopeEnforcer"
 import { PostToolHook } from "./PostToolHook"
 import { TraceLogger } from "./TraceLogger"
+import { OptimisticLockManager } from "./OptimisticLock"
+import { AstPatchValidator } from "./AstPatchValidator"
+import { LessonRecorder } from "./LessonRecorder"
 import type { HookContext, PreHookResult, IntentEntry, ActiveIntentsFile } from "./types"
 
 /**
@@ -72,6 +91,8 @@ import type { HookContext, PreHookResult, IntentEntry, ActiveIntentsFile } from 
  *
  * Phase 1: Gatekeeper + IntentContextLoader
  * Phase 2: CommandClassifier + AuthorizationGate + ScopeEnforcer + PostToolHook
+ * Phase 3: TraceLogger + HashUtils + SemanticClassifier
+ * Phase 4: OptimisticLock + AstPatchValidator + LessonRecorder + ContextCompactor
  */
 export class HookEngine {
 	/** Ordered list of pre-tool execution hooks (Phase 1) */
@@ -96,8 +117,15 @@ export class HookEngine {
 	 */
 	private readonly _preWriteContent: Map<string, string> = new Map()
 
+	/**
+	 * Phase 4: Optimistic Lock Manager for concurrency control.
+	 * Maintains content hash snapshots for stale file detection.
+	 */
+	private readonly _lockManager: OptimisticLockManager
+
 	constructor(cwd: string) {
 		this.cwd = cwd
+		this._lockManager = new OptimisticLockManager(cwd)
 
 		// Register Phase 1 pre-hooks in priority order:
 		// 1. Gatekeeper — blocks all mutating tools unless an intent is active
@@ -108,9 +136,11 @@ export class HookEngine {
 	/**
 	 * Execute the full pre-tool middleware pipeline.
 	 *
-	 * Pipeline order (Phase 1 + Phase 2):
+	 * Pipeline order (Phase 1 + Phase 2 + Phase 4):
 	 *   1. Phase 1 pre-hooks (Gatekeeper → IntentContextLoader)
 	 *   2. Phase 2 security boundary (classify → scope → authorize)
+	 *   3. Phase 4 concurrency control (optimistic lock → AST patch validation)
+	 *   4. Phase 3 pre-write content capture
 	 *
 	 * @param toolName - The canonical name of the tool being called
 	 * @param params   - The tool parameters as provided by the AI
@@ -132,13 +162,23 @@ export class HookEngine {
 
 		// ── Phase 2: Security Boundary ───────────────────────────────────
 		const securityResult = await this.runPhase2SecurityBoundary(toolName, params)
-
-		// ── Phase 3: Capture pre-write content for trace comparison ──────
-		if (securityResult.action === "allow") {
-			this.capturePreWriteContent(toolName, params)
+		if (securityResult.action !== "allow") {
+			return securityResult
 		}
 
-		return securityResult
+		// ── Phase 4: Concurrency Control ─────────────────────────────────
+		const concurrencyResult = this.runPhase4ConcurrencyControl(toolName, params)
+		if (concurrencyResult.action !== "allow") {
+			return concurrencyResult
+		}
+
+		// ── Phase 3: Capture pre-write content for trace comparison ──────
+		this.capturePreWriteContent(toolName, params)
+
+		// ── Phase 4: Capture read hash for optimistic locking ────────────
+		this.captureReadHashIfNeeded(toolName, params)
+
+		return { action: "allow" }
 	}
 
 	/**
@@ -269,6 +309,7 @@ export class HookEngine {
 	 *
 	 * Phase 2: Post-Edit Automation (Prettier + ESLint)
 	 * Phase 3: Agent Trace Recording (hash, classify, persist to JSONL)
+	 * Phase 4: Lesson Recording (on lint/test failures) + Lock State Update
 	 *
 	 * @param toolName - The tool that just executed
 	 * @param params   - The tool parameters
@@ -284,6 +325,9 @@ export class HookEngine {
 			if (result.hasErrors && result.feedback) {
 				console.warn(`[HookEngine] Post-hook errors for ${toolName}: ${result.feedback}`)
 				feedbackParts.push(result.feedback)
+
+				// ── Phase 4: Record lint failures to CLAUDE.md ───────
+				this.recordLintLessonIfNeeded(toolName, params, result)
 			} else if (result.feedback) {
 				console.log(`[HookEngine] Post-hook feedback for ${toolName}: ${result.feedback}`)
 				feedbackParts.push(result.feedback)
@@ -303,6 +347,9 @@ export class HookEngine {
 			const errorMessage = error instanceof Error ? error.message : "Unknown trace error"
 			console.error(`[HookEngine] Trace recording error: ${errorMessage}`)
 		}
+
+		// ── Phase 4: Update lock state after successful write ────────
+		this.updateLockAfterWrite(toolName, params)
 
 		return feedbackParts.length > 0 ? feedbackParts.join("\n\n") : null
 	}
@@ -445,16 +492,169 @@ export class HookEngine {
 		return this._activeIntent
 	}
 
+	/** Get the OptimisticLockManager instance (Phase 4) */
+	get lockManager(): OptimisticLockManager {
+		return this._lockManager
+	}
+
 	/** Clear the active intent (e.g., on session reset) */
 	clearActiveIntent(): void {
 		this._activeIntentId = null
 		this._intentContextXml = null
 		this._activeIntent = null
+		this._lockManager.clearAll()
 	}
 
 	/** Check whether a valid intent is currently active */
 	hasActiveIntent(): boolean {
 		return this._activeIntentId !== null && this._activeIntentId.length > 0
+	}
+
+	// ── Phase 4: Concurrency Control ─────────────────────────────────────
+
+	/**
+	 * Run Phase 4 concurrency control checks:
+	 *   1. Optimistic Locking — detect stale files
+	 *   2. AST-Aware Patch Validation — block full-file rewrites
+	 */
+	private runPhase4ConcurrencyControl(toolName: string, params: Record<string, unknown>): PreHookResult {
+		// Only check file-write operations
+		if (!CommandClassifier.isFileWriteOperation(toolName)) {
+			return { action: "allow" }
+		}
+
+		const filePath = this.extractWriteFilePath(toolName, params)
+		if (!filePath) {
+			return { action: "allow" }
+		}
+
+		// ── Optimistic Lock Check ────────────────────────────────────
+		const lockResult = this._lockManager.validateWrite(filePath)
+		if (!lockResult.allowed) {
+			console.warn(`[HookEngine] OPTIMISTIC LOCK CONFLICT: ${lockResult.reason}`)
+
+			// Phase 4: Record the lock conflict to CLAUDE.md
+			LessonRecorder.recordLockConflict(
+				filePath,
+				lockResult.baselineHash,
+				lockResult.currentHash,
+				this._activeIntentId,
+				this.cwd,
+			)
+
+			return {
+				action: "block",
+				toolResult: OptimisticLockManager.formatStaleFileError(
+					toolName,
+					filePath,
+					lockResult,
+					this._activeIntentId,
+				),
+			}
+		}
+
+		// ── AST-Aware Patch Validation ───────────────────────────────
+		const oldContent = this._preWriteContent.get(filePath) ?? TraceLogger.readOldContent(filePath, this.cwd)
+		const newContent = typeof params.content === "string" ? params.content : null
+
+		if (oldContent && newContent) {
+			const patchResult = AstPatchValidator.validate(toolName, oldContent, newContent, params)
+			if (!patchResult.valid) {
+				console.warn(`[HookEngine] AST PATCH BLOCKED: ${patchResult.reason}`)
+				return {
+					action: "block",
+					toolResult: [
+						"<ast_patch_error>",
+						`  <error_type>FULL_REWRITE_BLOCKED</error_type>`,
+						`  <tool>${toolName}</tool>`,
+						`  <file>${filePath}</file>`,
+						`  <change_ratio>${(patchResult.changeRatio * 100).toFixed(0)}%</change_ratio>`,
+						`  <reason>${patchResult.reason}</reason>`,
+						patchResult.guidance ?? "",
+						"</ast_patch_error>",
+					].join("\n"),
+				}
+			}
+		}
+
+		return { action: "allow" }
+	}
+
+	/**
+	 * Capture read hash for optimistic locking when reading files.
+	 * Also captures hash for files about to be written (baseline).
+	 */
+	private captureReadHashIfNeeded(toolName: string, params: Record<string, unknown>): void {
+		// Capture hash when reading files (establishes baseline)
+		if (toolName === "read_file") {
+			let filePath: string | null = null
+			if (typeof params.path === "string") {
+				filePath = params.path
+			} else if (typeof params.file_path === "string") {
+				filePath = params.file_path
+			}
+
+			if (filePath) {
+				this._lockManager.captureReadHash(filePath)
+			}
+		}
+
+		// Also capture hash for write targets if not already tracked
+		if (CommandClassifier.isFileWriteOperation(toolName)) {
+			const filePath = this.extractWriteFilePath(toolName, params)
+			if (filePath && !this._lockManager.getSnapshot(filePath)) {
+				this._lockManager.captureReadHash(filePath)
+			}
+		}
+	}
+
+	/**
+	 * Update lock state after a successful write operation.
+	 * Captures the new content hash as the new baseline.
+	 */
+	private updateLockAfterWrite(toolName: string, params: Record<string, unknown>): void {
+		if (!CommandClassifier.isFileWriteOperation(toolName)) {
+			return
+		}
+
+		const filePath = this.extractWriteFilePath(toolName, params)
+		if (filePath) {
+			this._lockManager.updateAfterWrite(filePath)
+		}
+	}
+
+	/**
+	 * Record lint/format failures to CLAUDE.md via LessonRecorder.
+	 */
+	private recordLintLessonIfNeeded(
+		toolName: string,
+		params: Record<string, unknown>,
+		postResult: { hasErrors: boolean; feedback: string | null; filePath: string | null },
+	): void {
+		if (!postResult.hasErrors || !postResult.filePath || !postResult.feedback) {
+			return
+		}
+
+		try {
+			// Extract lint errors from feedback
+			const errorLines = postResult.feedback
+				.split("\n")
+				.filter((line) => line.includes("Line "))
+				.map((line) => {
+					const match = /Line\s+(\d+):\s*(.+)/.exec(line)
+					if (!match) {
+						return null
+					}
+					return { line: Number.parseInt(match[1], 10), message: match[2] }
+				})
+				.filter((e): e is { line: number; message: string } => e !== null)
+
+			if (errorLines.length > 0) {
+				LessonRecorder.recordLintFailure(postResult.filePath, errorLines, this._activeIntentId, this.cwd)
+			}
+		} catch (error) {
+			console.warn(`[HookEngine] Failed to record lint lesson: ${error}`)
+		}
 	}
 
 	// ── Private Helpers ──────────────────────────────────────────────────

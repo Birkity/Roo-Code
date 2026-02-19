@@ -8,6 +8,8 @@
  * Phase 2: CommandClassifier, AuthorizationGate, AutonomousRecovery,
  *          ScopeEnforcer, PostToolHook
  * Phase 3: HashUtils, SemanticClassifier, TraceLogger
+ * Phase 4: OptimisticLockManager, AstPatchValidator, LessonRecorder,
+ *          ContextCompactor, SupervisorOrchestrator
  *
  * @see HookEngine.ts — main orchestrator
  * @see IntentContextLoader.ts — select_active_intent handler
@@ -20,6 +22,11 @@
  * @see HashUtils.ts — SHA-256 content hashing
  * @see SemanticClassifier.ts — AST_REFACTOR vs INTENT_EVOLUTION
  * @see TraceLogger.ts — Agent Trace serialization & persistence
+ * @see OptimisticLock.ts — concurrency control via hash-based locking
+ * @see AstPatchValidator.ts — AST-aware patch enforcement
+ * @see LessonRecorder.ts — lessons learned persistence to CLAUDE.md
+ * @see ContextCompactor.ts — context compaction for sub-agents
+ * @see SupervisorOrchestrator.ts — hierarchical orchestration
  * @see types.ts — shared types and constants
  */
 
@@ -63,6 +70,22 @@ export type {
 	TraceInput,
 	TraceResult,
 } from "./TraceLogger"
+
+// ── Phase 4 ──────────────────────────────────────────────────────────────
+export { OptimisticLockManager } from "./OptimisticLock"
+export type { FileHashSnapshot, LockValidationResult } from "./OptimisticLock"
+
+export { AstPatchValidator, PatchType } from "./AstPatchValidator"
+export type { PatchValidationResult, PatchTarget, DiffHunk } from "./AstPatchValidator"
+
+export { LessonRecorder, LessonCategory } from "./LessonRecorder"
+export type { LessonEntry, LessonResult } from "./LessonRecorder"
+
+export { ContextCompactor } from "./ContextCompactor"
+export type { ConversationTurn, CompactionConfig, CompactionResult, SubAgentContext } from "./ContextCompactor"
+
+export { SupervisorOrchestrator, AgentRole, SubTaskStatus } from "./SupervisorOrchestrator"
+export type { SubTask, SubTaskCompletionPayload, OrchestrationState } from "./SupervisorOrchestrator"
 
 // ── Shared Types ─────────────────────────────────────────────────────────
 export type { HookContext, PreHookResult, IntentEntry, ActiveIntentsFile } from "./types"

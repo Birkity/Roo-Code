@@ -35,7 +35,7 @@
 - [简体中文](locales/zh-CN/README.md)
 - [繁體中文](locales/zh-TW/README.md)
 - ...
-      </details>
+  </details>
 
 ---
 
@@ -66,10 +66,10 @@ Learn more: [Using Modes](https://docs.roocode.com/basic-usage/using-modes) • 
 
 <div align="center">
 
-|                                                                                                                                                                           |                                                                                                                                                                            |                                                                                                                                                                         |
-| :-----------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-| <a href="https://www.youtube.com/watch?v=Mcq3r1EPZ-4"><img src="https://img.youtube.com/vi/Mcq3r1EPZ-4/maxresdefault.jpg" width="100%"></a><br><b>Installing Roo Code</b> | <a href="https://www.youtube.com/watch?v=ZBML8h5cCgo"><img src="https://img.youtube.com/vi/ZBML8h5cCgo/maxresdefault.jpg" width="100%"></a><br><b>Configuring Profiles</b> | <a href="https://www.youtube.com/watch?v=r1bpod1VWhg"><img src="https://img.youtube.com/vi/r1bpod1VWhg/maxresdefault.jpg" width="100%"></a><br><b>Codebase Indexing</b> |
-|    <a href="https://www.youtube.com/watch?v=iiAv1eKOaxk"><img src="https://img.youtube.com/vi/iiAv1eKOaxk/maxresdefault.jpg" width="100%"></a><br><b>Custom Modes</b>     |     <a href="https://www.youtube.com/watch?v=Ho30nyY332E"><img src="https://img.youtube.com/vi/Ho30nyY332E/maxresdefault.jpg" width="100%"></a><br><b>Checkpoints</b>      |    <a href="https://www.youtube.com/watch?v=HmnNSasv7T8"><img src="https://img.youtube.com/vi/HmnNSasv7T8/maxresdefault.jpg" width="100%"></a><br><b>Context Management</b>     |
+|                                                                                                                                                                           |                                                                                                                                                                            |                                                                                                                                                                          |
+| :-----------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
+| <a href="https://www.youtube.com/watch?v=Mcq3r1EPZ-4"><img src="https://img.youtube.com/vi/Mcq3r1EPZ-4/maxresdefault.jpg" width="100%"></a><br><b>Installing Roo Code</b> | <a href="https://www.youtube.com/watch?v=ZBML8h5cCgo"><img src="https://img.youtube.com/vi/ZBML8h5cCgo/maxresdefault.jpg" width="100%"></a><br><b>Configuring Profiles</b> | <a href="https://www.youtube.com/watch?v=r1bpod1VWhg"><img src="https://img.youtube.com/vi/r1bpod1VWhg/maxresdefault.jpg" width="100%"></a><br><b>Codebase Indexing</b>  |
+|    <a href="https://www.youtube.com/watch?v=iiAv1eKOaxk"><img src="https://img.youtube.com/vi/iiAv1eKOaxk/maxresdefault.jpg" width="100%"></a><br><b>Custom Modes</b>     |     <a href="https://www.youtube.com/watch?v=Ho30nyY332E"><img src="https://img.youtube.com/vi/Ho30nyY332E/maxresdefault.jpg" width="100%"></a><br><b>Checkpoints</b>      | <a href="https://www.youtube.com/watch?v=HmnNSasv7T8"><img src="https://img.youtube.com/vi/HmnNSasv7T8/maxresdefault.jpg" width="100%"></a><br><b>Context Management</b> |
 
 </div>
 <p align="center">
@@ -156,6 +156,63 @@ We use [changesets](https://github.com/changesets/changesets) for versioning and
 ---
 
 ## Disclaimer
+
+## TRP1 Challenge — AI Hook Architecture Phases
+
+This fork implements the **TRP1 Challenge Week 1: Architecting the AI-Native IDE** — a four-phase hook system injected into Roo Code's tool execution pipeline. All source code lives in `src/hooks/`.
+
+For full architectural details, see [ARCHITECTURE_NOTES.md](ARCHITECTURE_NOTES.md).
+
+### Phase 0 — Archaeological Dig
+
+Mapped Roo Code's internal architecture: tool execution pipeline, system prompt generation, webview ↔ extension host IPC, and LLM conversation flow. Identified the precise injection points (`ClineProvider.ts` tool dispatch) for the hook middleware.
+
+### Phase 1 — Intent Protocol & Hook Engine
+
+Built the foundational middleware layer:
+
+- **HookEngine** (`HookEngine.ts`) — Central orchestrator for PreToolUse/PostToolUse hooks
+- **PreToolHook** (`PreToolHook.ts`) — Gatekeeper that checks active intents before tool execution
+- **IntentContextLoader** (`IntentContextLoader.ts`) — Reads `.orchestration/active_intents.yaml` and injects intent context into the LLM prompt
+- **types.ts** — Shared type definitions (`HookResult`, `ToolCallPayload`, etc.)
+
+### Phase 2 — Security Classification & Post-Edit Automation
+
+Added security guardrails and code quality enforcement:
+
+- **CommandClassifier** (`CommandClassifier.ts`) — Classifies tool calls into risk tiers: SAFE, DESTRUCTIVE, CRITICAL, META
+- **AuthorizationGate** (`AuthorizationGate.ts`) — UI-blocking human-in-the-loop approval modal for dangerous operations
+- **PostToolHook** (`PostToolHook.ts`) — Auto-runs Prettier + ESLint on modified files, feeds errors back for self-correction
+- **ScopeEnforcer** (`ScopeEnforcer.ts`) — Glob-based enforcement ensuring agents only write to their owned file scope
+- **AutonomousRecovery** (`AutonomousRecovery.ts`) — Formats standardized JSON errors on rejection so the LLM self-corrects
+
+### Phase 3 — Traceability & Semantic Classification
+
+Implemented the "golden thread" linking code changes to requirements:
+
+- **HashUtils** (`HashUtils.ts`) — SHA-256 content hashing with CRLF normalization and range hashing
+- **SemanticClassifier** (`SemanticClassifier.ts`) — Weighted scoring model discriminating AST_REFACTOR vs INTENT_EVOLUTION
+- **TraceLogger** (`TraceLogger.ts`) — Builds Agent Trace records (per `agent-trace.dev` spec) and persists to `.orchestration/agent_trace.jsonl`
+
+### Phase 4 — Multi-Agent Concurrency & Context Management
+
+Extended the pipeline for parallel agent orchestration:
+
+- **OptimisticLock** (`OptimisticLock.ts`) — Hash-based optimistic locking preventing stale-write conflicts between agents
+- **AstPatchValidator** (`AstPatchValidator.ts`) — Blocks full-file rewrites, enforces targeted diffs, identifies changed symbols
+- **LessonRecorder** (`LessonRecorder.ts`) — Persists lessons to `CLAUDE.md` shared brain (lint errors, write conflicts, scope violations)
+- **ContextCompactor** (`ContextCompactor.ts`) — Truncates tool outputs and summarizes older conversation turns to combat Context Rot
+- **SupervisorOrchestrator** (`SupervisorOrchestrator.ts`) — Hierarchical Manager → Worker orchestration with role-based task delegation
+
+### Test Coverage
+
+233 tests across 11 test suites covering all four phases. Run with:
+
+```sh
+cd src && npx vitest run hooks/__tests__/ --reporter=verbose
+```
+
+---
 
 **Please note** that Roo Code, Inc does **not** make any representations or warranties regarding any code, models, or other tools provided or made available in connection with Roo Code, any associated third-party tools, or any resulting outputs. You assume **all risks** associated with the use of any such tools or outputs; such tools are provided on an **"AS IS"** and **"AS AVAILABLE"** basis. Such risks may include, without limitation, intellectual property infringement, cyber vulnerabilities or attacks, bias, inaccuracies, errors, defects, viruses, downtime, property loss or damage, and/or personal injury. You are solely responsible for your use of any such tools or outputs (including, without limitation, the legality, appropriateness, and results thereof).
 

@@ -428,3 +428,318 @@ Expected:
     "File not found: .orchestration/active_intents.yaml"
   → AI asks user to create the file
 ```
+
+---
+
+## Phase 2: Security Classification & Post-Edit Automation
+
+**Objective**: Add security guardrails and quality enforcement to the hook pipeline. Every tool call is risk-classified, destructive operations require human approval, file writes are scope-checked, and modified files are auto-formatted/linted.
+
+### 2.1 Component Inventory
+
+| File                    | Purpose                                                         | Lines |
+| ----------------------- | --------------------------------------------------------------- | ----- |
+| `CommandClassifier.ts`  | Risk-tier classification (SAFE / DESTRUCTIVE / CRITICAL / META) | 228   |
+| `AuthorizationGate.ts`  | UI-blocking human-in-the-loop modal for risky operations        | 260   |
+| `PostToolHook.ts`       | Post-edit Prettier + ESLint auto-formatting                     | 310   |
+| `ScopeEnforcer.ts`      | Glob-based owned-scope enforcement for file writes              | 206   |
+| `AutonomousRecovery.ts` | Self-correction error formatting on rejection                   | 229   |
+
+### 2.2 Command Classification (`CommandClassifier.ts`)
+
+Classifies every tool call into one of four risk tiers:
+
+- **SAFE** — Read-only operations (`read_file`, `list_files`, `search_files`)
+- **DESTRUCTIVE** — Write/delete operations (`write_to_file`, `apply_diff`)
+- **CRITICAL** — High-risk terminal commands (`rm -rf`, `git push --force`)
+- **META** — Conversation control tools (`ask_followup_question`, `attempt_completion`)
+
+Uses static tool-name mapping plus regex pattern matching for `execute_command` payloads.
+
+### 2.3 Authorization Gate (`AuthorizationGate.ts`)
+
+Implements the HITL (Human-in-the-Loop) boundary:
+
+1. SAFE/META operations → auto-approved
+2. DESTRUCTIVE operations → VS Code warning modal with Approve/Reject
+3. CRITICAL operations → VS Code warning modal showing the matched dangerous pattern
+4. `.intentignore` support for bypassing checks on trusted intents
+
+The Promise chain is **paused indefinitely** until the user clicks Approve or Reject — this is the "impenetrable defense against runaway execution loops."
+
+### 2.4 Post-Edit Formatting (`PostToolHook.ts`)
+
+Fires AFTER a tool successfully executes:
+
+1. Detects the modified file path from tool params
+2. Runs Prettier on the file
+3. Runs ESLint on the file
+4. If errors → appends feedback to the next `tool_result` for self-correction
+5. If clean → logs success
+
+### 2.5 Scope Enforcement (`ScopeEnforcer.ts`)
+
+Validates that file-write targets fall within the active intent's `owned_scope` glob patterns. Uses the `picomatch` algorithm for glob matching. Out-of-scope writes are blocked immediately with a structured scope violation error.
+
+### 2.6 Autonomous Recovery (`AutonomousRecovery.ts`)
+
+When AuthorizationGate rejects an operation, formats a standardized JSON `tool_result` error so the LLM can self-correct rather than crash or infinite-loop. Recovery guidance includes: acknowledging the rejection, analyzing the violated constraint, and proposing a safe alternative.
+
+### 2.7 Test Coverage
+
+| Test File                    | Tests |
+| ---------------------------- | ----- |
+| `ScopeEnforcer.test.ts`      | 13    |
+| `AutonomousRecovery.test.ts` | 6     |
+| `PostToolHook.test.ts`       | 18    |
+| `CommandClassifier.test.ts`  | 18    |
+| `AuthorizationGate.test.ts`  | 13    |
+
+---
+
+## Phase 3: Traceability & Semantic Classification
+
+**Objective**: Implement the "golden thread" linking every code change back to its originating requirement via Agent Trace records, content hashing, and mutation classification.
+
+### 3.1 Component Inventory
+
+| File                    | Purpose                                                  | Lines |
+| ----------------------- | -------------------------------------------------------- | ----- |
+| `HashUtils.ts`          | SHA-256 content hashing with normalization               | ~180  |
+| `SemanticClassifier.ts` | Weighted scoring model: AST_REFACTOR vs INTENT_EVOLUTION | 315   |
+| `TraceLogger.ts`        | Agent Trace record builder + JSONL sidecar persistence   | 288   |
+
+### 3.2 Content Hashing (`HashUtils.ts`)
+
+- `hashFile(content)` — SHA-256 of normalized file content
+- `hashRange(content, startLine, endLine)` — Hash a specific line range (spatial independence)
+- `verify(content, hash)` — Check content against a stored hash
+- `normalizeContent(content)` — CRLF→LF, trim trailing whitespace, remove trailing newlines
+
+All hashes are prefixed with `sha256:` for forward-compatible algorithm identification.
+
+### 3.3 Semantic Classification (`SemanticClassifier.ts`)
+
+Weighted mathematical scoring model:
+
+$$\text{Score} = w_1 \cdot \Delta\text{Imports} + w_2 \cdot \Delta\text{Exports} + w_3 \cdot \Delta\text{Signatures} + w_4 \cdot \Delta\text{LineCount} + w_5 \cdot \text{NewSymbols}$$
+
+- Score >= 0.35 → `INTENT_EVOLUTION` (new feature/behavior)
+- Score < 0.35 → `AST_REFACTOR` (intent-preserving refactor)
+
+Also supports `classifyWithOverride()` for agent-provided classification with agreement tracking.
+
+### 3.4 Agent Trace Logger (`TraceLogger.ts`)
+
+Builds Agent Trace records per the `agent-trace.dev` spec:
+
+1. Captures `vcs.revision_id` from current Git SHA
+2. Computes before/after content hashes
+3. Injects the active Requirement ID into the `related` field (the "golden thread")
+4. Classifies the mutation via `SemanticClassifier`
+5. Appends the record as a line to `.orchestration/agent_trace.jsonl`
+
+### 3.5 Integration with HookEngine
+
+TraceLogger fires in the **PostToolUse** pipeline:
+
+- After a file-modifying tool executes successfully
+- Captures the before/after state and writes a trace record
+- The trace links back to the active intent's requirement ID
+
+### 3.6 Test Coverage
+
+| Test File                    | Tests |
+| ---------------------------- | ----- |
+| `HashUtils.test.ts`          | 11    |
+| `SemanticClassifier.test.ts` | 14    |
+| `TraceLogger.test.ts`        | 20    |
+
+---
+
+## Phase 4: Multi-Agent Concurrency & Context Management
+
+**Objective**: Extend the Hook Engine to support parallel agent orchestration with concurrency-safe file operations, AST-aware patching, context compaction, hierarchical sub-agent management, and persistent lesson recording.
+
+### 4.1 Architecture Overview
+
+```
+Phase 4 Integration Flow (inside HookEngine)
+
+  ┌─────────────────┐
+  │   Pre-Hook       │
+  │ (runPreHooks)    │
+  │                  │
+  │ 1. Gatekeeper    │──── Phase 1: Intent validation
+  │ 2. Security      │──── Phase 2: Classification + AuthZ + Scope
+  │ 3. Concurrency   │──── Phase 4: OptimisticLock + AstPatchValidator
+  └────────┬─────────┘
+           │
+           ▼
+  ┌─────────────────┐
+  │   Tool Executes  │──── Roo Code processes the tool call
+  └────────┬─────────┘
+           │
+           ▼
+  ┌─────────────────┐
+  │   Post-Hook      │
+  │ (runPostHooks)   │
+  │                  │
+  │ 1. Format+Lint   │──── Phase 2: PostToolHook (Prettier/ESLint)
+  │ 2. Trace         │──── Phase 3: TraceLogger + SemanticClassifier
+  │ 3. Lessons       │──── Phase 4: LessonRecorder (lint → CLAUDE.md)
+  │ 4. Lock Update   │──── Phase 4: updateLockAfterWrite
+  └─────────────────┘
+```
+
+### 4.2 Component Inventory
+
+| File                        | Purpose                                          | Pattern                            |
+| --------------------------- | ------------------------------------------------ | ---------------------------------- |
+| `OptimisticLock.ts`         | Hash-based concurrency control                   | Stateful (per HookEngine instance) |
+| `AstPatchValidator.ts`      | Block full-file rewrites, enforce targeted diffs | Static utility                     |
+| `LessonRecorder.ts`         | Persist lessons to CLAUDE.md shared brain        | Static utility                     |
+| `ContextCompactor.ts`       | Prevent context rot via summarization            | Static utility                     |
+| `SupervisorOrchestrator.ts` | Hierarchical sub-agent orchestration             | Stateful                           |
+
+### 4.3 Optimistic Locking (`OptimisticLock.ts`)
+
+**Purpose**: Detect concurrent file modifications in multi-agent environments.
+
+**Algorithm**:
+
+1. When agent reads a file → `captureReadHash(path)` stores SHA-256 baseline
+2. When agent writes a file → `validateWrite(path)` re-hashes disk content
+3. If baseline ≠ current → **BLOCK** write with `STALE_FILE` error
+4. After successful write → `updateAfterWrite(path)` refreshes baseline
+
+**Key Design Decisions**:
+
+- Ring buffer of 10 snapshots per file (supports multi-agent snapshot stacking)
+- Agent-scoped snapshot matching via optional `agentId`
+- Non-blocking for concurrent readers (optimistic, not pessimistic)
+- Structured XML error feedback via `formatStaleFileError()`
+
+**Integration Point**: `HookEngine.runPhase4ConcurrencyControl()` calls `validateWrite` in the pre-hook pipeline for all mutating tool calls.
+
+### 4.4 AST-Aware Patch Validation (`AstPatchValidator.ts`)
+
+**Purpose**: Force agents to emit targeted patches instead of full-file rewrites.
+
+**Strategy**:
+
+- `computeChangeRatio()` — O(n) line-set comparison between old/new content
+- If change ratio > **60%** on files with **≥15 lines** → block as `FULL_REWRITE`
+- `extractSymbols()` — Regex-based AST symbol detection (functions, classes, interfaces)
+- `identifyChangedSymbols()` — Diffs old vs new symbol sets for structural guidance
+- `parseUnifiedDiff()` — Validates `@@ -a,b +c,d @@` hunk format for `apply_diff`
+
+**Validated Tools**: `write_to_file`, `apply_diff`, `edit`, `search_and_replace`, `search_replace`, `edit_file`, `apply_patch`
+
+**Always Allowed**: New file creation, search-and-replace (inherently targeted), small files (<15 lines)
+
+### 4.5 Lesson Recording (`LessonRecorder.ts`)
+
+**Purpose**: Persist "lessons learned" to `CLAUDE.md` — the shared brain file.
+
+**Trigger Points**:
+
+- Lint failure → `recordLintFailure()` extracts ESLint rule names
+- Test failure → `recordTestFailure()` captures stderr
+- Scope violation → `recordScopeViolation()` logs owned scope boundaries
+- Lock conflict → `recordLockConflict()` logs baseline/current hash divergence
+- Architectural decision → `recordArchitecturalDecision()` (manual agent recording)
+
+**File Management**:
+
+- Auto-creates `CLAUDE.md` with template structure if absent
+- Appends to `## Lessons Learned` section
+- Auto-prunes to 200 lessons maximum (removes oldest)
+
+**Integration Point**: `HookEngine.recordLintLessonIfNeeded()` calls `LessonRecorder.recordLintFailure()` in the post-hook pipeline after PostToolHook reports lint errors.
+
+### 4.6 Context Compaction (`ContextCompactor.ts`)
+
+**Purpose**: Prevent "Context Rot" by summarizing older conversation turns before the context window overflows.
+
+**Key Methods**:
+
+- `truncateToolOutput(output, maxLength)` — Preserves head (60%) + tail (20%) with truncation marker
+- `compact(turns, config)` — Splits conversation into old (summarized) + recent (preserved verbatim)
+- `summarizeTurns(turns, maxLength)` — Role-aware bullet-point summary (`[User]`, `[Agent]`, `[Result]`, `[System]`)
+- `prepareSubAgentContext(taskSpec, files, parentTurns, intent, cwd)` — Builds narrow context for sub-agent spawn
+- `estimateTokens(turns)` — Heuristic: 4 chars ≈ 1 token
+
+**Default Configuration**:
+
+- `maxTokenBudget`: 120,000 tokens
+- `maxToolOutputLength`: 3,000 chars
+- `preserveRecentTurns`: 6 (verbatim preservation)
+- `maxSummaryLength`: 2,000 chars
+- `exportStateToTaskFile`: true (persists state to `.orchestration/TASKS.md` before compaction)
+
+### 4.7 Supervisor Orchestration (`SupervisorOrchestrator.ts`)
+
+**Purpose**: Implements the hierarchical Manager → Worker pattern for multi-agent coordination.
+
+**Agent Roles** (enum `AgentRole`):
+
+- `ARCHITECT` — Plans decomposition, owns no code
+- `BUILDER` — Implements features in assigned scope
+- `TESTER` — Writes and runs tests
+- `REVIEWER` — Reviews diffs for quality
+- `DOCUMENTER` — Updates documentation
+
+**Sub-Task Lifecycle**:
+
+1. `createSubTask(description, role, scope)` → `PENDING`
+2. `prepareSubTask(id, parentTurns, intent)` → `IN_PROGRESS` (builds `SubAgentContext`)
+3. Sub-agent executes autonomously within assigned scope
+4. `completeSubTask(id, payload)` → `COMPLETED` or `FAILED`
+
+**Write Partitioning**:
+
+- `validateScopePartitioning()` — Detects scope overlaps between sub-tasks
+- `findScopeOverlap(scopeA, scopeB)` — Prefix-based containment check
+- Mathematically eliminates spatial conflicts by assigning disjoint file scopes
+
+**Execution Order**:
+
+- `getExecutionOrder()` — Topological sort with priority-based tie-breaking
+- Dependency-aware: task B waits for task A's completion before starting
+
+**State Persistence**:
+
+- Saves to `.orchestration/orchestration_state.json` after every mutation
+- `loadState(cwd)` — Recovers state for session continuation
+
+### 4.8 Test Coverage
+
+| Test File                        | Tests   | Covers                                                                                                                        |
+| -------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `OptimisticLock.test.ts`         | 23      | Hash capture, validation (match/mismatch/deleted), agent-scoped matching, ring buffer, clear, normalization, error formatting |
+| `AstPatchValidator.test.ts`      | 25      | Full-rewrite detection, new file, targeted diff, search-replace, change ratio, symbol extraction, diff parsing                |
+| `LessonRecorder.test.ts`         | 17      | Formatting, recording, brain file creation, convenience methods, category enum                                                |
+| `ContextCompactor.test.ts`       | 25      | Truncation, token estimation, summarization, compaction, sub-agent context                                                    |
+| `SupervisorOrchestrator.test.ts` | 30      | Sub-task CRUD, dependency blocking, scope partitioning, execution order, status reporting, state persistence                  |
+| **Total**                        | **120** | Full Phase 4 coverage                                                                                                         |
+
+### 4.9 `index.ts` Public API (Phase 4 Exports)
+
+```typescript
+// ── Phase 4 ──────────────────────────────────────────────────────────────
+export { OptimisticLockManager } from "./OptimisticLock"
+export type { FileHashSnapshot, LockValidationResult } from "./OptimisticLock"
+
+export { AstPatchValidator, PatchType } from "./AstPatchValidator"
+export type { PatchValidationResult, PatchTarget, DiffHunk } from "./AstPatchValidator"
+
+export { LessonRecorder, LessonCategory } from "./LessonRecorder"
+export type { LessonEntry, LessonResult } from "./LessonRecorder"
+
+export { ContextCompactor } from "./ContextCompactor"
+export type { ConversationTurn, CompactionConfig, CompactionResult, SubAgentContext } from "./ContextCompactor"
+
+export { SupervisorOrchestrator, AgentRole, SubTaskStatus } from "./SupervisorOrchestrator"
+export type { SubTask, SubTaskCompletionPayload, OrchestrationState } from "./SupervisorOrchestrator"
+```
