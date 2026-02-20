@@ -4,6 +4,8 @@ const WRITE_TO_FILE_DESCRIPTION = `Request to write content to a file. This tool
 
 **Important:** You should prefer using other editing tools over write_to_file when making changes to existing files, since write_to_file is slower and cannot handle large files. Use write_to_file primarily for new file creation.
 
+**⚠️ AST-Aware Patch Enforcement:** Full-file rewrites on existing files with more than 15 lines are BLOCKED by the AST-Aware Patch Validator. For existing files, use apply_diff or search_and_replace for targeted edits instead. Only new files or files with ≤15 lines may use write_to_file. Required parameters: intent_id and mutation_class.
+
 When using this tool, use it directly with the desired content. You do not need to display the content before using the tool. ALWAYS provide the COMPLETE file content in your response. This is NON-NEGOTIABLE. Partial updates or placeholders like '// rest of code unchanged' are STRICTLY FORBIDDEN. Failure to do so will result in incomplete or broken code.
 
 When creating a new project, organize all new files within a dedicated project directory unless the user specifies otherwise. Structure the project logically, adhering to best practices for the specific type of project being created.
@@ -14,6 +16,11 @@ Example: Writing a configuration file
 const PATH_PARAMETER_DESCRIPTION = `The path of the file to write to (relative to the current workspace directory)`
 
 const CONTENT_PARAMETER_DESCRIPTION = `The content to write to the file. ALWAYS provide the COMPLETE intended content of the file, without any truncation or omissions. You MUST include ALL parts of the file, even if they haven't been modified. Do NOT include line numbers in the content.`
+
+// Phase 3: Intent-Code Traceability parameters
+const INTENT_ID_DESCRIPTION = `The active Intent ID that authorizes this file write (e.g., "INT-001"). This links the code change to its originating business requirement for traceability. If you have selected an active intent via select_active_intent, provide that intent ID here.`
+
+const MUTATION_CLASS_DESCRIPTION = `The semantic classification of this code change. Must be one of: "AST_REFACTOR" (syntax change preserving the same intent — rename, extract, reformat) or "INTENT_EVOLUTION" (new feature or behavior change). This enables the AI-Native Git Layer to distinguish refactors from features mathematically.`
 
 export default {
 	type: "function",
@@ -32,8 +39,17 @@ export default {
 					type: "string",
 					description: CONTENT_PARAMETER_DESCRIPTION,
 				},
+				intent_id: {
+					type: "string",
+					description: INTENT_ID_DESCRIPTION,
+				},
+				mutation_class: {
+					type: "string",
+					description: MUTATION_CLASS_DESCRIPTION,
+					enum: ["AST_REFACTOR", "INTENT_EVOLUTION"],
+				},
 			},
-			required: ["path", "content"],
+			required: ["path", "content", "intent_id", "mutation_class"],
 			additionalProperties: false,
 		},
 	},

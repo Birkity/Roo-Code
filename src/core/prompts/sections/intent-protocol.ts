@@ -9,9 +9,7 @@
  * and is appended near the end of the system prompt for maximum salience —
  * LLMs attend more strongly to instructions at the beginning and end of prompts.
  *
- * @see src/core/prompts/system.ts — where this section is injected
- * @see src/hooks/HookEngine.ts — the runtime enforcement of this protocol
- * @see TRP1 Challenge Week 1, Phase 1: Prompt Engineering
+ *
  */
 
 /**
